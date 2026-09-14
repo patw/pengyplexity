@@ -15,6 +15,16 @@ process tree.** The sandbox is not a feature of this app — it is the point of 
 
 ---
 
+## Screenshot
+
+Pengyplexity on a phone: a question answered with an image the agent generated
+into that thread's own workspace — answer text, inline artifact and all, still
+inside the sandbox.
+
+![Pengyplexity chat on mobile — a dapper penguin reading at a library desk, generated into the thread workspace and shown inline](docs/images/chat-mobile.png)
+
+---
+
 ## Architecture at a glance
 
 ```
