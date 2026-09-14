@@ -4,7 +4,9 @@
 <html lang="en"{% if theme_mode and theme_mode != 'system' %} data-theme="{{ theme_mode }}"{% endif %} data-accent="{{ theme_accent or 'orange' }}">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    {# interactive-widget: the on-screen keyboard shrinks the layout (so the
+       chat input stays visible) instead of overlaying it. #}
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
     <title>{% block title %}Pengyplexity{% endblock %}</title>
     {# Bootstrap is served locally from static/ so tests run offline — no CDN. #}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
@@ -13,6 +15,33 @@
 </head>
 <body>
     {% block body %}{% endblock %}
+    <script>
+    // Mobile sidebar drawer. On narrow screens the sidebar is off-canvas
+    // (see "Mobile" in app.css); [data-drawer-toggle] buttons open it, and a
+    // tap outside it or Escape closes it. Inert on desktop and on pages
+    // without a sidebar.
+    (function () {
+        'use strict';
+        var body = document.body;
+        function setOpen(open) {
+            body.classList.toggle('drawer-open', open);
+            document.querySelectorAll('[data-drawer-toggle]').forEach(function (b) {
+                b.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+        }
+        document.addEventListener('click', function (e) {
+            if (e.target.closest('[data-drawer-toggle]')) {
+                setOpen(!body.classList.contains('drawer-open'));
+            } else if (body.classList.contains('drawer-open') &&
+                       !e.target.closest('.chat-sidebar, .admin-sidebar')) {
+                setOpen(false);
+            }
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') setOpen(false);
+        });
+    })();
+    </script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

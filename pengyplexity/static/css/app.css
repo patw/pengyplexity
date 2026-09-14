@@ -75,6 +75,7 @@ body {
     border: 1px solid var(--border);
     border-radius: 6px;
     font-size: 1rem;
+    font-family: inherit;
     box-sizing: border-box;
     background: var(--input-bg);
     color: var(--input-fg);
@@ -87,9 +88,19 @@ body {
     padding: .5rem 1rem;
     border: none;
     border-radius: 6px;
+    /* Variants set their own fill; without this a bare modifier (e.g. a lone
+       .btn-danger) falls back to the browser's light-grey button face,
+       which glares in dark mode. */
+    background: transparent;
+    color: var(--fg);
+    /* Browsers don't inherit fonts into <button>; without these a button and
+       an <a class="btn"> side by side differ in typeface and height. */
+    font-family: inherit;
+    line-height: 1.25;
     font-size: .95rem;
     cursor: pointer;
     text-decoration: none;
+    white-space: nowrap;
 }
 .btn-primary { background: var(--primary); color: var(--primary-fg); }
 .btn-primary:hover { background: var(--primary-hover); }
@@ -113,20 +124,19 @@ body {
 .alert-danger { background: color-mix(in srgb, var(--danger) 15%, var(--bg)); color: var(--danger); }
 .alert-success { background: color-mix(in srgb, var(--success) 18%, var(--bg)); color: var(--success); }
 
-.account-back-link {
-    display: block;
-    text-align: center;
-    margin-top: 1.25rem;
-    color: var(--link);
-    text-decoration: none;
-    font-size: .9rem;
-}
-.account-back-link:hover { text-decoration: underline; }
+/* The account page stacks two cards, taller than a laptop screen: pad so the
+   top card clears the fixed back button instead of sitting flush at y=0. */
+.account-wrapper { padding: 4.5rem 1rem 2rem; box-sizing: border-box; }
 
 /* --- Chat layout --- */
+/* dvh = the *visible* viewport. Plain 100vh on mobile includes the area
+   behind the browser's address bar, which pushed the input off-screen and
+   left a blank strip at the bottom when zooming. 100vh stays as a fallback. */
 .chat-layout {
     display: flex;
     height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
 }
 
 /* Sidebar */
@@ -144,8 +154,14 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: .25rem;
 }
-.sidebar-title { font-size: 1.1rem; margin: 0; }
+.sidebar-title { font-size: 1.1rem; margin: 0; white-space: nowrap; }
+/* Title and "+ New" only just share the 260px sidebar; trim the button. */
+.sidebar-header .btn { padding-inline: .5rem; }
+/* One shared height so the sidebar and chat header dividers line up whether
+   or not either one holds a button (e.g. a brand-new thread). */
+.sidebar-header, .chat-header { box-sizing: border-box; min-height: 3.75rem; }
 .sidebar-nav {
     display: flex;
     flex-direction: column;
@@ -177,7 +193,8 @@ body {
 .thread-item.active { background: var(--primary); color: var(--primary-fg); }
 .thread-title { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .thread-date { display: block; font-size: .75rem; color: var(--muted); }
-.thread-item.active .thread-date { color: rgba(255,255,255,.7); }
+/* Derived from --primary-fg, not white: some accents (pink) use dark text. */
+.thread-item.active .thread-date { color: color-mix(in srgb, var(--primary-fg) 70%, transparent); }
 /* Sidebar thread row + delete control */
 .thread-item-row {
     display: flex;
@@ -188,7 +205,7 @@ body {
 .thread-item-row.active { background: var(--primary); }
 .thread-item-row .thread-item { flex: 1; min-width: 0; margin-bottom: 0; }
 .thread-item-row.active .thread-item { color: var(--primary-fg); }
-.thread-item-row.active .thread-date { color: rgba(255,255,255,.7); }
+.thread-item-row.active .thread-date { color: color-mix(in srgb, var(--primary-fg) 70%, transparent); }
 .thread-item-row:not(.active):hover { background: var(--hover); }
 .thread-delete-form { display: flex; align-items: center; flex-shrink: 0; padding-right: .25rem; }
 .thread-delete-btn {
@@ -202,7 +219,7 @@ body {
     border-radius: 4px;
 }
 .thread-delete-btn:hover { color: var(--danger); background: var(--hover); }
-.thread-item-row.active .thread-delete-btn { color: rgba(255,255,255,.6); }
+.thread-item-row.active .thread-delete-btn { color: color-mix(in srgb, var(--primary-fg) 60%, transparent); }
 .thread-item-row.active .thread-delete-btn:hover { color: var(--primary-fg); background: rgba(0,0,0,.15); }
 .sidebar-footer {
     padding: .75rem 1rem;
@@ -225,6 +242,7 @@ body {
 /* Chat main */
 .chat-main {
     flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     background: var(--bg);
@@ -246,11 +264,12 @@ body {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.btn-danger { color: var(--danger); }
+.btn-danger { color: var(--danger); border: 1px solid var(--border); }
 .btn-danger:hover { background: color-mix(in srgb, var(--danger) 12%, var(--bg)); border-color: var(--danger); }
 .chat-messages {
     flex: 1;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 1.5rem;
 }
 
@@ -273,8 +292,10 @@ body {
 }
 .message-user .message-avatar { background: var(--panel-3); color: var(--user-label); }
 .message-assistant .message-avatar { background: var(--primary); color: var(--primary-fg); }
-.message-body { flex: 1; }
-.message-content { white-space: pre-wrap; line-height: 1.5; }
+/* min-width: 0 lets wide content (code, tables) scroll inside the message
+   instead of stretching the flex row past the screen edge. */
+.message-body { flex: 1; min-width: 0; }
+.message-content { white-space: pre-wrap; line-height: 1.5; overflow-wrap: anywhere; }
 /* Rendered Markdown (assistant answers). Override white-space so headings/
    lists/paragraphs flow; pre-wrap still applies to pre/code blocks. */
 .message-content.markdown-body { white-space: normal; }
@@ -306,8 +327,12 @@ body {
     border-radius: 8px;
     padding: .75rem 1rem;
     overflow-x: auto;
+    overflow-wrap: normal;
     margin: 0 0 .6rem;
 }
+.table-scroll { overflow-x: auto; margin: 0 0 .6rem; }
+.table-scroll > table { margin-bottom: 0; }
+.markdown-body th, .markdown-body td { overflow-wrap: normal; }
 .markdown-body pre code { background: transparent; color: inherit; padding: 0; }
 .markdown-body blockquote {
     border-left: 3px solid var(--primary);
@@ -331,7 +356,9 @@ body {
     text-align: left;
     vertical-align: top;
 }
-.markdown-body th { background: var(--panel); font-weight: 600; }
+/* Headers stay on one line; a wide table scrolls in .table-scroll instead
+   of squeezing columns until each header wraps word by word. */
+.markdown-body th { background: var(--panel); font-weight: 600; white-space: nowrap; }
 .markdown-body strong { font-weight: 700; }
 .message-sources {
     margin-top: .5rem;
@@ -360,6 +387,8 @@ body {
     width: auto;
     resize: none;
     border-radius: 8px;
+    max-height: 40vh;
+    max-height: 40dvh;
 }
 .chat-input-form .btn {
     flex-shrink: 0;
@@ -417,6 +446,8 @@ body {
 .admin-layout {
     display: flex;
     height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
 }
 .admin-sidebar {
     width: 260px;
@@ -436,6 +467,7 @@ body {
 .admin-nav .thread-item.active { background: var(--primary); color: var(--primary-fg); }
 .admin-main {
     flex: 1;
+    min-width: 0;
     overflow-y: auto;
     padding: 2rem 2.5rem;
     background: var(--bg);
@@ -460,6 +492,9 @@ body {
     gap: 1rem;
     flex-wrap: wrap;
 }
+/* Rows zero their groups' margin to bottom-align the fields, so the row
+   itself restores the gap before whatever follows it. */
+.form-row:not(:last-child) { margin-bottom: 1rem; }
 .form-row .form-group { margin-bottom: 0; flex: 1 1 180px; }
 .form-group-check { flex: 0 0 auto; }
 .form-group-check label {
@@ -479,6 +514,9 @@ body {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .field-toggle { margin-top: .4rem; }
+/* The system prompt is Markdown-ish config text; keep it monospace now that
+   .form-control inherits the UI font. */
+#set-system-message { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9rem; }
 
 .admin-table {
     width: 100%;
@@ -490,6 +528,8 @@ body {
     padding: .65rem .75rem;
     border-bottom: 1px solid var(--border-soft);
     vertical-align: middle;
+    /* Dates and headers stay on one line; tables sit in .table-scroll. */
+    white-space: nowrap;
 }
 .admin-table th {
     font-weight: 600;
@@ -499,7 +539,9 @@ body {
     letter-spacing: .03em;
 }
 .admin-table tbody tr:hover { background: var(--hover); }
-.actions-cell { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+/* One row; a narrow screen scrolls the table (.table-scroll) rather than
+   stacking the buttons into a column that the scroller clips. */
+.actions-cell { display: flex; align-items: center; gap: .5rem; }
 
 .badge {
     display: inline-block;
@@ -655,3 +697,133 @@ body {
 .accent-swatch-red { background: #d20f39; }
 .accent-swatch-pink { background: #ea76cb; }
 .accent-swatch-purple { background: #8839ef; }
+
+/* --- Mobile --- */
+/* Desktop defaults for the mobile-only chrome (drawer toggle, top bar). */
+.mobile-only, .mobile-topbar, .drawer-toggle { display: none; }
+.drawer-toggle {
+    border: none;
+    background: transparent;
+    color: var(--fg);
+    font-size: 1.35rem;
+    line-height: 1;
+    width: 2.5rem;
+    height: 2.5rem;
+    margin-left: -.5rem;
+    border-radius: 6px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.drawer-toggle:hover { background: var(--hover); }
+
+@media (max-width: 768px) {
+    .desktop-only { display: none; }
+    .btn.mobile-only { display: inline-block; }
+    .chat-header.mobile-only, .drawer-toggle { display: flex; align-items: center; justify-content: center; }
+    .chat-header.mobile-only { justify-content: space-between; }
+
+    /* Sidebar becomes an off-canvas drawer. */
+    .chat-sidebar, .admin-sidebar {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 50;
+        width: min(85vw, 300px);
+        min-width: 0;
+        transform: translateX(-100%);
+        transition: transform .2s ease;
+        box-shadow: 0 0 30px rgba(0,0,0,.25);
+        visibility: hidden;
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        box-sizing: border-box;
+    }
+    body.drawer-open .chat-sidebar,
+    body.drawer-open .admin-sidebar {
+        transform: none;
+        visibility: visible;
+    }
+    /* Backdrop behind the open drawer; taps on it close the drawer (base.html). */
+    .chat-layout::after, .admin-layout::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        background: rgba(0,0,0,.4);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity .2s ease;
+    }
+    body.drawer-open .chat-layout::after,
+    body.drawer-open .admin-layout::after {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    /* Bigger tap targets in the drawer. */
+    .thread-item { padding: .75rem; }
+    .thread-delete-btn { font-size: 1.4rem; padding: .5rem .7rem; }
+    .sidebar-nav-link { padding: .7rem .75rem; }
+
+    /* Chat pane */
+    .chat-header {
+        gap: .5rem;
+        padding: .5rem .75rem;
+        padding-top: calc(.5rem + env(safe-area-inset-top));
+    }
+    .chat-header-title { flex: 1; min-width: 0; font-size: 1rem; }
+    .chat-messages { padding: 1rem .75rem; }
+    .message { gap: .5rem; }
+    .message-avatar { width: 26px; height: 26px; font-size: .75rem; }
+    .markdown-body img, .artifact-inline img { max-height: 60vh; }
+    .chat-input-area {
+        padding: .5rem .75rem;
+        padding-bottom: calc(.5rem + env(safe-area-inset-bottom));
+    }
+    .chat-input-form { gap: .5rem; }
+    .chat-input-form .btn { padding: .6rem 1rem; }
+
+    /* Admin-style pages (workspace, memories, admin) */
+    .admin-layout { flex-direction: column; }
+    .mobile-topbar {
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+        padding: .5rem .75rem;
+        padding-top: calc(.5rem + env(safe-area-inset-top));
+        border-bottom: 1px solid var(--border-soft);
+        background: var(--bg);
+    }
+    .mobile-topbar-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .admin-main {
+        padding: 1rem .75rem;
+        padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
+    }
+    .admin-main h1 { font-size: 1.3rem; margin-bottom: 1rem; }
+    .admin-card { padding: 1rem; margin-bottom: 1rem; }
+    .form-row .form-group { flex-basis: 100% !important; }
+    .workspace-header, .workspace-group-header { flex-wrap: wrap; gap: .5rem; }
+    .workspace-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: .75rem; }
+    .memory-search-form { flex-wrap: wrap; }
+    .memory-search-form .form-control { flex-basis: 100%; }
+    .admin-table { font-size: .85rem; }
+
+    /* Login / account */
+    .login-wrapper {
+        flex-direction: column;
+        justify-content: flex-start;
+        padding: 1rem;
+        padding-top: calc(1rem + env(safe-area-inset-top));
+        box-sizing: border-box;
+        min-height: 100dvh;
+    }
+    .login-wrapper > .login-card { margin: auto 0; }
+    /* border-box: width:100% plus padding otherwise overflows the phone and
+       the browser zooms the whole page out to fit it. */
+    .login-card { padding: 1.5rem; box-sizing: border-box; }
+    .account-topnav-back { position: static; align-self: flex-start; margin-bottom: 1rem; }
+
+    /* iOS zooms into any focused field under 16px and never zooms back out. */
+    .form-control, .input-sm { font-size: 16px; }
+}

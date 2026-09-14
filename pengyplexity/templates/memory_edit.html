@@ -11,8 +11,8 @@
             <a href="{{ url_for('web.workspace') }}" class="thread-item">🗂 Workspace</a>
             <a href="{{ url_for('web.memories') }}" class="thread-item active">🧠 Memories</a>
             {% if current_user.get('is_admin') %}
-            <a href="{{ url_for('admin.list_users') }}" class="thread-item">User Management</a>
-            <a href="{{ url_for('admin.settings') }}" class="thread-item">Settings</a>
+            <a href="{{ url_for('admin.list_users') }}" class="thread-item">🛠 User Management</a>
+            <a href="{{ url_for('admin.settings') }}" class="thread-item">⚙️ Settings</a>
             {% endif %}
         </nav>
         <div class="sidebar-footer">
@@ -25,6 +25,12 @@
             </span>
         </div>
     </aside>
+
+    <div class="mobile-topbar">
+        <button type="button" class="drawer-toggle" data-drawer-toggle
+                aria-label="Open menu" aria-expanded="false">☰</button>
+        <span class="mobile-topbar-title">Edit memory</span>
+    </div>
 
     <main class="admin-main">
         <h1>Edit memory</h1>
@@ -68,6 +74,7 @@
         {% if memory.update_history %}
         <div class="admin-card">
             <h2>History</h2>
+            <div class="table-scroll">
             <table class="admin-table">
                 <thead><tr><th>When</th><th>Editor</th><th>Changed</th></tr></thead>
                 <tbody>
@@ -80,6 +87,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         </div>
         {% endif %}
     </main>

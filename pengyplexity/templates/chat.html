@@ -45,17 +45,20 @@
 
     <!-- Main chat pane -->
     <main class="chat-main">
-        {% if thread %}
-        <div class="chat-header">
-            <h1 class="chat-header-title">{{ thread.title }}</h1>
-            {% if thread.messages %}
+        {# Always rendered: on mobile it carries the drawer toggle even for a
+           brand-new thread. On desktop it is hidden when there is no thread. #}
+        <div class="chat-header{% if not thread %} mobile-only{% endif %}">
+            <button type="button" class="drawer-toggle" data-drawer-toggle
+                    aria-label="Open menu" aria-expanded="false">☰</button>
+            <h1 class="chat-header-title">{{ thread.title if thread else 'New Thread' }}</h1>
+            {% if thread and thread.messages %}
             <form method="POST" action="{{ url_for('web.delete_thread', thread_id=thread['_id']) }}"
-                  onsubmit="return confirm('Delete this chat?');">
+                  onsubmit="return confirm('Delete this chat?');" class="desktop-only">
                 <button type="submit" class="btn btn-sm btn-outline btn-danger">Delete chat</button>
             </form>
             {% endif %}
+            <a href="/chat/new" class="btn btn-sm btn-outline mobile-only" aria-label="New chat">+ New</a>
         </div>
-        {% endif %}
         <div class="chat-messages" id="chat-messages">
             {% for msg in (thread.messages if thread else []) %}
             {% set msg_index = loop.index0 %}
@@ -227,7 +230,9 @@
                     rows.push('<tr>' + cells.map(function(c){return '<td>'+inline(c)+'</td>';}).join('') + '</tr>');
                     i++;
                 }
-                out.push('<table><thead><tr>' + headerCells.map(function(c){return '<th>'+inline(c)+'</th>';}).join('') + '</tr></thead><tbody>' + rows.join('') + '</tbody></table>');
+                // Wrapped so a wide table scrolls on its own instead of
+                // widening the whole chat pane.
+                out.push('<div class="table-scroll"><table><thead><tr>' + headerCells.map(function(c){return '<th>'+inline(c)+'</th>';}).join('') + '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>');
                 continue;
             }
             if (line.trim() === '') { i++; continue; }
@@ -256,9 +261,12 @@
 
     if (!form) return;
 
-    // Enter submits the question; Shift+Enter inserts a newline.
+    // Enter submits the question; Shift+Enter inserts a newline. On touch
+    // devices there is no Shift key, so Enter stays a newline there and the
+    // Ask button submits.
+    var touch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
     input.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (e.key === 'Enter' && !e.shiftKey && !touch) {
             e.preventDefault();
             if (typeof form.requestSubmit === 'function') {
                 form.requestSubmit();
@@ -267,6 +275,14 @@
             }
         }
     });
+
+    // Grow the textarea with its content up to a cap (see .chat-input
+    // max-height), so a long question doesn't hide behind a scrollbar.
+    function autosize() {
+        input.style.height = 'auto';
+        input.style.height = input.scrollHeight + 'px';
+    }
+    input.addEventListener('input', autosize);
 
     var turnArtifacts = [];
     var turnSources = [];
@@ -455,6 +471,7 @@
             stopping = false;
             setRunning(false);
             input.value = '';
+            autosize();
             scrollDown();
         }
 

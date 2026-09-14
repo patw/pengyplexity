@@ -10,11 +10,11 @@
             <a href="{{ url_for('web.chat_index') }}" class="thread-item">← Back to Chat</a>
             <a href="{{ url_for('web.workspace') }}" class="thread-item">🗂 Workspace</a>
             <a href="{{ url_for('web.memories') }}" class="thread-item">🧠 Memories</a>
-            <a href="{{ url_for('admin.list_users') }}" class="thread-item active">User Management</a>
-            <a href="{{ url_for('admin.settings') }}" class="thread-item">Settings</a>
+            <a href="{{ url_for('admin.list_users') }}" class="thread-item active">🛠 User Management</a>
+            <a href="{{ url_for('admin.settings') }}" class="thread-item">⚙️ Settings</a>
         </nav>
         <div class="sidebar-footer">
-            <span class="user-badge">{{ current_user['username'] }} (admin)</span>
+            <span class="user-badge">{{ current_user['username'] }}</span>
             <span class="sidebar-footer-actions">
                 <a href="{{ url_for('web.change_password') }}" class="btn btn-sm btn-outline">Account</a>
                 <form method="POST" action="{{ url_for('web.logout') }}" class="inline-form">
@@ -23,6 +23,12 @@
             </span>
         </div>
     </aside>
+
+    <div class="mobile-topbar">
+        <button type="button" class="drawer-toggle" data-drawer-toggle
+                aria-label="Open menu" aria-expanded="false">☰</button>
+        <span class="mobile-topbar-title">User Management</span>
+    </div>
 
     <main class="admin-main">
         <h1>User Management</h1>
@@ -60,6 +66,7 @@
         <!-- User list table -->
         <div class="admin-card">
             <h2>Users ({{ users|length }})</h2>
+            <div class="table-scroll">
             <table class="admin-table">
                 <thead>
                     <tr>
@@ -83,7 +90,8 @@
                             {% endif %}
                         </td>
                         <td>{{ u['last_login'].strftime('%Y-%m-%d %H:%M') if u.get('last_login') else 'Never' }}</td>
-                        <td class="actions-cell">
+                        <td>
+                            <div class="actions-cell">
                             {% if u['_id'] != current_user['_id'] %}
                                 {% if u.get('enabled', true) %}
                                 <form method="POST" action="{{ url_for('admin.disable_user', user_id=u['_id']) }}" class="inline-form">
@@ -105,11 +113,13 @@
                             {% else %}
                             <span class="text-muted">—</span>
                             {% endif %}
+                            </div>
                         </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         </div>
     </main>
 </div>

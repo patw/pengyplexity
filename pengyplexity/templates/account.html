@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Account — Pengyplexity{% endblock %}
 {% block body %}
-<div class="login-wrapper">
+<div class="login-wrapper account-wrapper">
     <a href="{{ url_for('web.chat_index') }}" class="account-topnav-back">&larr; Back to chat</a>
     <div class="account-stack">
         <div class="login-card">
@@ -63,8 +63,6 @@
                 <button type="submit" class="btn btn-primary btn-block">Update password</button>
             </form>
         </div>
-
-        <a class="account-back-link" href="{{ url_for('web.chat_index') }}">&larr; Back to chat</a>
     </div>
 </div>
 {% endblock %}

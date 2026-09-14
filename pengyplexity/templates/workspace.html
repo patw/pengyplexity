@@ -11,8 +11,8 @@
             <a href="{{ url_for('web.workspace') }}" class="thread-item active">🗂 Workspace</a>
             <a href="{{ url_for('web.memories') }}" class="thread-item">🧠 Memories</a>
             {% if current_user.get('is_admin') %}
-            <a href="{{ url_for('admin.list_users') }}" class="thread-item">User Management</a>
-            <a href="{{ url_for('admin.settings') }}" class="thread-item">Settings</a>
+            <a href="{{ url_for('admin.list_users') }}" class="thread-item">🛠 User Management</a>
+            <a href="{{ url_for('admin.settings') }}" class="thread-item">⚙️ Settings</a>
             {% endif %}
         </nav>
         <div class="sidebar-footer">
@@ -25,6 +25,12 @@
             </span>
         </div>
     </aside>
+
+    <div class="mobile-topbar">
+        <button type="button" class="drawer-toggle" data-drawer-toggle
+                aria-label="Open menu" aria-expanded="false">☰</button>
+        <span class="mobile-topbar-title">Workspace</span>
+    </div>
 
     <main class="admin-main">
         <div class="workspace-header">
