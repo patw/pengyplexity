@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}Admin — Settings — Pengyplexity{% endblock %}
+{% block body %}
+<div class="admin-layout">
+    <aside class="admin-sidebar">
+        <div class="sidebar-header">
+            <h2 class="sidebar-title">🐧 Pengyplexity</h2>
+        </div>
+        <nav class="admin-nav">
+            <a href="{{ url_for('web.chat_index') }}" class="thread-item">← Back to Chat</a>
+            <a href="{{ url_for('admin.list_users') }}" class="thread-item">User Management</a>
+            <a href="{{ url_for('admin.settings') }}" class="thread-item active">Settings</a>
+        </nav>
+        <div class="sidebar-footer">
+            <span class="user-badge">{{ current_user['username'] }} (admin)</span>
+            <span class="sidebar-footer-actions">
+                <a href="{{ url_for('web.change_password') }}" class="btn btn-sm btn-outline">Account</a>
+                <form method="POST" action="{{ url_for('web.logout') }}" class="inline-form">
+                    <button type="submit" class="btn btn-sm btn-outline">Logout</button>
+                </form>
+            </span>
+        </div>
+    </aside>
+
+    <main class="admin-main">
+        <div class="workspace-header">
+            <h1>Settings</h1>
+            <form method="POST" action="{{ url_for('admin.reset_settings') }}"
+                  onsubmit="return confirm('Reset ALL settings to their defaults? This clears every override below.');">
+                <button type="submit" class="btn btn-outline btn-danger">Reset all to defaults</button>
+            </form>
+        </div>
+        <p class="text-muted memories-intro">
+            Every field falls back to its environment-configured default when left blank.
+            Changes take effect on the next chat turn — no restart needed.
+        </p>
+
+        {% if error %}
+        <div class="alert alert-danger">{{ error }}</div>
+        {% endif %}
+        {% if success %}
+        <div class="alert alert-success">{{ success }}</div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('admin.settings') }}">
+            <div class="admin-card">
+                <h2>System message</h2>
+                <div class="form-group">
+                    <label for="set-system-message">Agent system prompt</label>
+                    <textarea id="set-system-message" name="system_message" class="form-control" rows="10"
+                              placeholder="{{ default_system_message }}">{{ overrides.get('system_message', '') }}</textarea>
+                    <p class="field-hint">Grey text above is the app's built-in default prompt — shown for reference, not submitted. Leave this field blank to use it as-is; type here only to override it.</p>
+                </div>
+            </div>
+
+            <div class="admin-card">
+                <h2>Model connection</h2>
+                <div class="form-row">
+                    <div class="form-group" style="flex: 2 1 320px;">
+                        <label for="set-model-base">Base URL</label>
+                        <input type="text" id="set-model-base" name="model_base" class="form-control"
+                               placeholder="{{ settings.model_base }}" value="{{ overrides.get('model_base', '') }}">
+                    </div>
+                    <div class="form-group" style="flex: 1 1 200px;">
+                        <label for="set-model-name">Model</label>
+                        <input type="text" id="set-model-name" name="model_name" class="form-control"
+                               placeholder="{{ settings.model_name }}" value="{{ overrides.get('model_name', '') }}">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex: 2 1 320px;">
+                        <label for="set-model-key">API key</label>
+                        <input type="password" id="set-model-key" name="model_key" class="form-control"
+                               placeholder="(unchanged)" value="{{ overrides.get('model_key', '') }}"
+                               autocomplete="off">
+                        <button type="button" class="btn btn-sm btn-outline field-toggle" data-target="set-model-key">Show</button>
+                    </div>
+                    <div class="form-group" style="flex: 1 1 140px;">
+                        <label for="set-model-temp">Temperature</label>
+                        <input type="text" id="set-model-temp" name="model_temperature" class="form-control"
+                               placeholder="{{ settings.model_temperature }}" value="{{ overrides.get('model_temperature', '') }}">
+                    </div>
+                    <div class="form-group" style="flex: 1 1 140px;">
+                        <label for="set-llm-timeout">LLM timeout (s)</label>
+                        <input type="text" id="set-llm-timeout" name="llm_timeout" class="form-control"
+                               placeholder="{{ settings.llm_timeout }}" value="{{ overrides.get('llm_timeout', '') }}">
+                    </div>
+                </div>
+                <p class="field-hint">Blank fields fall back to the <code>PENGYPLEXITY_MODEL_*</code> environment defaults shown as placeholders.</p>
+            </div>
+
+            <div class="admin-card">
+                <h2>Agent &amp; tool limits</h2>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="set-max-iter">Max agent iterations</label>
+                        <input type="text" id="set-max-iter" name="max_agent_iterations" class="form-control"
+                               placeholder="{{ settings.max_agent_iterations }}" value="{{ overrides.get('max_agent_iterations', '') }}">
+                        <p class="field-hint">Hard cap on tool-call round-trips per turn (runaway-loop guard).</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="set-tool-output-max">Max tool output (chars)</label>
+                        <input type="text" id="set-tool-output-max" name="tool_output_max_chars" class="form-control"
+                               placeholder="{{ settings.tool_output_max_chars }}" value="{{ overrides.get('tool_output_max_chars', '') }}">
+                        <p class="field-hint">Longer tool results are snipped (head+tail). 0 = no limit.</p>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="set-download-max">Max download (MB)</label>
+                        <input type="text" id="set-download-max" name="download_max_mb" class="form-control"
+                               placeholder="{{ settings.download_max_mb }}" value="{{ overrides.get('download_max_mb', '') }}">
+                        <p class="field-hint">Cap for download_file. 0 = unlimited.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="set-net-timeout">Web tool timeout (s)</label>
+                        <input type="text" id="set-net-timeout" name="tool_network_timeout" class="form-control"
+                               placeholder="{{ settings.tool_network_timeout }}" value="{{ overrides.get('tool_network_timeout', '') }}">
+                        <p class="field-hint">Timeout for web_search / fetch_url / download_file.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="set-user-agent">User-Agent</label>
+                        <input type="text" id="set-user-agent" name="user_agent" class="form-control"
+                               placeholder="{{ settings.user_agent }}" value="{{ overrides.get('user_agent', '') }}">
+                    </div>
+                </div>
+            </div>
+
+            <div class="admin-card">
+                <h2>Sandbox execution (run_python / run_bash)</h2>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="set-exec-timeout">Wall-clock timeout (s)</label>
+                        <input type="text" id="set-exec-timeout" name="exec_timeout" class="form-control"
+                               placeholder="{{ settings.exec_timeout }}" value="{{ overrides.get('exec_timeout', '') }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="set-exec-mem">Memory limit (MB)</label>
+                        <input type="text" id="set-exec-mem" name="exec_mem_mb" class="form-control"
+                               placeholder="{{ settings.exec_mem_mb }}" value="{{ overrides.get('exec_mem_mb', '') }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="set-exec-cpu">CPU time limit (s)</label>
+                        <input type="text" id="set-exec-cpu" name="exec_cpu_seconds" class="form-control"
+                               placeholder="{{ settings.exec_cpu_seconds }}" value="{{ overrides.get('exec_cpu_seconds', '') }}">
+                    </div>
+                </div>
+                <p class="field-hint">Passed straight to bwrap's <code>--rlimit-as</code>/<code>--rlimit-cpu</code> and the runner's wall-clock kill timer. The sandbox itself (no host network, no host filesystem, non-root, capability-dropped) is not configurable here — that's structural, not a setting.</p>
+            </div>
+
+            <div class="admin-card">
+                <h2>Memory search relevance</h2>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="set-mem-floor">Relevance floor (0–1)</label>
+                        <input type="text" id="set-mem-floor" name="memory_signal_floor" class="form-control"
+                               placeholder="{{ settings.memory_signal_floor }}" value="{{ overrides.get('memory_signal_floor', '') }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="set-mem-confident">Confidence bar (0–1)</label>
+                        <input type="text" id="set-mem-confident" name="memory_signal_confident" class="form-control"
+                               placeholder="{{ settings.memory_signal_confident }}" value="{{ overrides.get('memory_signal_confident', '') }}">
+                    </div>
+                </div>
+                <p class="field-hint">A memory is only returned when its semantic similarity to the query clears the <strong>floor</strong>; above the <strong>confidence bar</strong> it is reported as a strong match rather than a lead. Raise the floor if searches return loosely-related memories, lower it if real ones are being missed. The right value depends on your corpus and the embedding model — the defaults were measured on a small one, so expect to retune as memories accumulate.</p>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Save settings</button>
+        </form>
+    </main>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelectorAll('.field-toggle').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        var input = document.getElementById(btn.dataset.target);
+        if (!input) return;
+        var hidden = input.type === 'password';
+        input.type = hidden ? 'text' : 'password';
+        btn.textContent = hidden ? 'Hide' : 'Show';
+    });
+});
+</script>
+{% endblock %}

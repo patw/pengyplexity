@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Workspace — Pengyplexity{% endblock %}
+{% block body %}
+<div class="admin-layout">
+    <aside class="admin-sidebar">
+        <div class="sidebar-header">
+            <h2 class="sidebar-title">🐧 Pengyplexity</h2>
+        </div>
+        <nav class="admin-nav">
+            <a href="{{ url_for('web.chat_index') }}" class="thread-item">← Back to Chat</a>
+            <a href="{{ url_for('web.workspace') }}" class="thread-item active">🗂 Workspace</a>
+            <a href="{{ url_for('web.memories') }}" class="thread-item">🧠 Memories</a>
+            {% if current_user.get('is_admin') %}
+            <a href="{{ url_for('admin.list_users') }}" class="thread-item">User Management</a>
+            <a href="{{ url_for('admin.settings') }}" class="thread-item">Settings</a>
+            {% endif %}
+        </nav>
+        <div class="sidebar-footer">
+            <span class="user-badge">{{ current_user['username'] }}</span>
+            <span class="sidebar-footer-actions">
+                <a href="{{ url_for('web.change_password') }}" class="btn btn-sm btn-outline">Account</a>
+                <form method="POST" action="{{ url_for('web.logout') }}" class="inline-form">
+                    <button type="submit" class="btn btn-sm btn-outline">Logout</button>
+                </form>
+            </span>
+        </div>
+    </aside>
+
+    <main class="admin-main">
+        <div class="workspace-header">
+            <h1>Workspace</h1>
+            {% if total_count %}
+            <a href="{{ url_for('web.workspace_zip') }}" class="btn btn-primary">Download all ({{ total_count }}) as ZIP</a>
+            {% endif %}
+        </div>
+
+        {% if not group_ids %}
+        <div class="admin-card">
+            <p class="text-muted">No charts, images, or other artifacts yet. Ask a question that
+                produces a chart or image and it'll show up here.</p>
+        </div>
+        {% endif %}
+
+        {% for tid in group_ids %}
+        {% set thread = threads_by_id.get(tid) %}
+        <div class="admin-card">
+            <div class="workspace-group-header">
+                <h2>
+                    {% if thread %}
+                    <a href="{{ url_for('web.chat_view', thread_id=tid) }}">{{ thread.title }}</a>
+                    {% else %}
+                    (deleted thread)
+                    {% endif %}
+                </h2>
+                <a href="{{ url_for('web.workspace_zip', thread_id=tid) }}" class="btn btn-sm btn-outline">Download thread as ZIP</a>
+            </div>
+            <div class="workspace-grid">
+                {% for art in groups[tid] %}
+                <div class="workspace-item">
+                    {% if art.kind in ('chart', 'image') %}
+                    <a href="{{ url_for('web.download_artifact', thread_id=tid, artifact_id=art['_id']) }}" class="workspace-thumb-link">
+                        <img class="workspace-thumb"
+                             src="{{ url_for('web.download_artifact', thread_id=tid, artifact_id=art['_id'], inline=1) }}"
+                             alt="{{ art.filename }}" loading="lazy">
+                    </a>
+                    {% else %}
+                    <a href="{{ url_for('web.download_artifact', thread_id=tid, artifact_id=art['_id']) }}" class="workspace-doc-link">
+                        <span class="workspace-doc-icon">📄</span>
+                    </a>
+                    {% endif %}
+                    <div class="workspace-item-meta">
+                        <span class="artifact-label">{{ art.kind }}</span>
+                        <a href="{{ url_for('web.download_artifact', thread_id=tid, artifact_id=art['_id']) }}" class="workspace-item-name">{{ art.filename }}</a>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </main>
+</div>
+{% endblock %}

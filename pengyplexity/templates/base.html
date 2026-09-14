@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+{# data-theme is omitted entirely for "system" mode, so the page follows the
+   browser's prefers-color-scheme instead (see static/css/theme.css). #}
+<html lang="en"{% if theme_mode and theme_mode != 'system' %} data-theme="{{ theme_mode }}"{% endif %} data-accent="{{ theme_accent or 'orange' }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Pengyplexity{% endblock %}</title>
+    {# Bootstrap is served locally from static/ so tests run offline — no CDN. #}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    {% block body %}{% endblock %}
+    {% block scripts %}{% endblock %}
+</body>
+</html>

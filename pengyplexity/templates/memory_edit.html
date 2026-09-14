@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Edit memory — Pengyplexity{% endblock %}
+{% block body %}
+<div class="admin-layout">
+    <aside class="admin-sidebar">
+        <div class="sidebar-header">
+            <h2 class="sidebar-title">🐧 Pengyplexity</h2>
+        </div>
+        <nav class="admin-nav">
+            <a href="{{ url_for('web.chat_index') }}" class="thread-item">← Back to Chat</a>
+            <a href="{{ url_for('web.workspace') }}" class="thread-item">🗂 Workspace</a>
+            <a href="{{ url_for('web.memories') }}" class="thread-item active">🧠 Memories</a>
+            {% if current_user.get('is_admin') %}
+            <a href="{{ url_for('admin.list_users') }}" class="thread-item">User Management</a>
+            <a href="{{ url_for('admin.settings') }}" class="thread-item">Settings</a>
+            {% endif %}
+        </nav>
+        <div class="sidebar-footer">
+            <span class="user-badge">{{ current_user['username'] }}</span>
+            <span class="sidebar-footer-actions">
+                <a href="{{ url_for('web.change_password') }}" class="btn btn-sm btn-outline">Account</a>
+                <form method="POST" action="{{ url_for('web.logout') }}" class="inline-form">
+                    <button type="submit" class="btn btn-sm btn-outline">Logout</button>
+                </form>
+            </span>
+        </div>
+    </aside>
+
+    <main class="admin-main">
+        <h1>Edit memory</h1>
+        {% if error %}
+        <div class="alert alert-danger">{{ error }}</div>
+        {% endif %}
+
+        <div class="admin-card">
+            <form method="POST" action="{{ url_for('web.edit_memory', memory_id=memory['_id']) }}">
+                <div class="form-group">
+                    <label for="mem-title">Title</label>
+                    <input type="text" id="mem-title" name="title" required class="form-control" value="{{ memory.title }}">
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex: 2 1 260px;">
+                        <label for="mem-tags">Tags (comma-separated)</label>
+                        <input type="text" id="mem-tags" name="tags" class="form-control" value="{{ memory.tags|join(', ') }}">
+                    </div>
+                    <div class="form-group" style="flex: 1 1 160px;">
+                        <label for="mem-status">Status</label>
+                        <select id="mem-status" name="status" class="form-control">
+                            <option value="active" {% if memory.status == 'active' %}selected{% endif %}>active</option>
+                            <option value="superseded" {% if memory.status == 'superseded' %}selected{% endif %}>superseded</option>
+                            <option value="deprecated" {% if memory.status == 'deprecated' %}selected{% endif %}>deprecated</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="mem-summary">Summary</label>
+                    <input type="text" id="mem-summary" name="summary" required class="form-control" value="{{ memory.summary }}">
+                </div>
+                <div class="form-group">
+                    <label for="mem-body">Details</label>
+                    <textarea id="mem-body" name="body" class="form-control" rows="5">{{ memory.body }}</textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">Save changes</button>
+                <a href="{{ url_for('web.memories') }}" class="btn btn-outline">Cancel</a>
+            </form>
+        </div>
+
+        {% if memory.update_history %}
+        <div class="admin-card">
+            <h2>History</h2>
+            <table class="admin-table">
+                <thead><tr><th>When</th><th>Editor</th><th>Changed</th></tr></thead>
+                <tbody>
+                    {% for rec in memory.update_history|reverse %}
+                    <tr>
+                        <td>{{ rec.timestamp.strftime('%Y-%m-%d %H:%M') if rec.timestamp else '' }}</td>
+                        <td>{{ rec.editor }}</td>
+                        <td>{{ rec.changed|join(', ') }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </main>
+</div>
+{% endblock %}

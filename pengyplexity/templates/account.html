@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Account — Pengyplexity{% endblock %}
+{% block body %}
+<div class="login-wrapper">
+    <a href="{{ url_for('web.chat_index') }}" class="account-topnav-back">&larr; Back to chat</a>
+    <div class="account-stack">
+        <div class="login-card">
+            <h1 class="login-title">Appearance</h1>
+            <p class="login-subtitle">Pick a theme — changes preview instantly, Save makes them permanent.</p>
+            <form method="POST" action="{{ url_for('web.update_theme') }}" id="theme-form">
+                <div class="form-group">
+                    <label>Theme mode</label>
+                    <div class="theme-mode-options">
+                        {% for mode in ['system', 'light', 'dark'] %}
+                        <label>
+                            <input type="radio" name="theme_mode" value="{{ mode }}"
+                                   {% if theme_mode == mode %}checked{% endif %}>
+                            {{ mode|capitalize }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Accent color</label>
+                    <div class="accent-swatches">
+                        {% for accent in ['default', 'blue', 'teal', 'green', 'orange', 'red', 'pink', 'purple'] %}
+                        <label class="accent-swatch accent-swatch-{{ accent }}" title="{{ accent|capitalize }}">
+                            <input type="radio" name="theme_accent" value="{{ accent }}"
+                                   {% if theme_accent == accent %}checked{% endif %}>
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Save appearance</button>
+            </form>
+        </div>
+
+        <div class="login-card">
+            <h1 class="login-title">Change password</h1>
+            <p class="login-subtitle">Signed in as {{ current_user['username'] }}</p>
+            {% if error %}
+            <div class="alert alert-danger">{{ error }}</div>
+            {% endif %}
+            {% if success %}
+            <div class="alert alert-success">{{ success }}</div>
+            {% endif %}
+            <form method="POST" action="{{ url_for('web.change_password') }}">
+                <div class="form-group">
+                    <label for="current-password">Current password</label>
+                    <input type="password" id="current-password" name="current_password" required
+                           class="form-control" placeholder="current password">
+                </div>
+                <div class="form-group">
+                    <label for="new-password">New password</label>
+                    <input type="password" id="new-password" name="new_password" required
+                           class="form-control" placeholder="new password">
+                </div>
+                <div class="form-group">
+                    <label for="confirm-password">Confirm new password</label>
+                    <input type="password" id="confirm-password" name="confirm_password" required
+                           class="form-control" placeholder="confirm new password">
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Update password</button>
+            </form>
+        </div>
+
+        <a class="account-back-link" href="{{ url_for('web.chat_index') }}">&larr; Back to chat</a>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+    'use strict';
+    // Live preview: apply the picked theme/accent immediately, before Save
+    // is even clicked, by toggling the same data-theme/data-accent
+    // attributes the server stamps on <html> (see base.html / theme.css).
+    var form = document.getElementById('theme-form');
+    if (!form) return;
+
+    function applyPreview() {
+        var mode = form.querySelector('input[name="theme_mode"]:checked');
+        var accent = form.querySelector('input[name="theme_accent"]:checked');
+        var root = document.documentElement;
+        if (mode) {
+            if (mode.value === 'system') {
+                root.removeAttribute('data-theme');
+            } else {
+                root.setAttribute('data-theme', mode.value);
+            }
+        }
+        if (accent) {
+            root.setAttribute('data-accent', accent.value);
+        }
+    }
+
+    form.querySelectorAll('input[type="radio"]').forEach(function (input) {
+        input.addEventListener('change', applyPreview);
+    });
+})();
+</script>
+{% endblock %}

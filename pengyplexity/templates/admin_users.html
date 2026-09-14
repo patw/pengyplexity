@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Admin — Users — Pengyplexity{% endblock %}
+{% block body %}
+<div class="admin-layout">
+    <aside class="admin-sidebar">
+        <div class="sidebar-header">
+            <h2 class="sidebar-title">🐧 Pengyplexity</h2>
+        </div>
+        <nav class="admin-nav">
+            <a href="{{ url_for('web.chat_index') }}" class="thread-item">← Back to Chat</a>
+            <a href="{{ url_for('web.workspace') }}" class="thread-item">🗂 Workspace</a>
+            <a href="{{ url_for('web.memories') }}" class="thread-item">🧠 Memories</a>
+            <a href="{{ url_for('admin.list_users') }}" class="thread-item active">User Management</a>
+            <a href="{{ url_for('admin.settings') }}" class="thread-item">Settings</a>
+        </nav>
+        <div class="sidebar-footer">
+            <span class="user-badge">{{ current_user['username'] }} (admin)</span>
+            <span class="sidebar-footer-actions">
+                <a href="{{ url_for('web.change_password') }}" class="btn btn-sm btn-outline">Account</a>
+                <form method="POST" action="{{ url_for('web.logout') }}" class="inline-form">
+                    <button type="submit" class="btn btn-sm btn-outline">Logout</button>
+                </form>
+            </span>
+        </div>
+    </aside>
+
+    <main class="admin-main">
+        <h1>User Management</h1>
+
+        {% if error %}
+        <div class="alert alert-danger">{{ error }}</div>
+        {% endif %}
+        {% if success %}
+        <div class="alert alert-success">{{ success }}</div>
+        {% endif %}
+
+        <!-- Create user form -->
+        <div class="admin-card">
+            <h2>Create User</h2>
+            <form method="POST" action="{{ url_for('admin.create_user') }}">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="new-username">Username</label>
+                        <input type="text" id="new-username" name="username" required class="form-control" placeholder="username">
+                    </div>
+                    <div class="form-group">
+                        <label for="new-password">Password</label>
+                        <input type="password" id="new-password" name="password" required class="form-control" placeholder="password">
+                    </div>
+                    <div class="form-group form-group-check">
+                        <label>
+                            <input type="checkbox" name="is_admin" id="new-is-admin"> Admin
+                        </label>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Create</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- User list table -->
+        <div class="admin-card">
+            <h2>Users ({{ users|length }})</h2>
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Username</th>
+                        <th>Role</th>
+                        <th>Status</th>
+                        <th>Last Login</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in users %}
+                    <tr>
+                        <td>{{ u['username'] }}</td>
+                        <td>{{ 'Admin' if u.get('is_admin') else 'User' }}</td>
+                        <td>
+                            {% if u.get('enabled', true) %}
+                            <span class="badge badge-enabled">Enabled</span>
+                            {% else %}
+                            <span class="badge badge-disabled">Disabled</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ u['last_login'].strftime('%Y-%m-%d %H:%M') if u.get('last_login') else 'Never' }}</td>
+                        <td class="actions-cell">
+                            {% if u['_id'] != current_user['_id'] %}
+                                {% if u.get('enabled', true) %}
+                                <form method="POST" action="{{ url_for('admin.disable_user', user_id=u['_id']) }}" class="inline-form">
+                                    <button type="submit" class="btn btn-sm btn-warning">Disable</button>
+                                </form>
+                                {% else %}
+                                <form method="POST" action="{{ url_for('admin.enable_user', user_id=u['_id']) }}" class="inline-form">
+                                    <button type="submit" class="btn btn-sm btn-success">Enable</button>
+                                </form>
+                                {% endif %}
+                                <form method="POST" action="{{ url_for('admin.reset_password', user_id=u['_id']) }}" class="inline-form">
+                                    <input type="password" name="new_password" class="form-control input-sm" placeholder="new pw" required>
+                                    <button type="submit" class="btn btn-sm btn-outline">Reset PW</button>
+                                </form>
+                                <form method="POST" action="{{ url_for('admin.delete_user', user_id=u['_id']) }}" class="inline-form"
+                                      onsubmit="return confirm('Delete user {{ u['username'] }}?')">
+                                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                                </form>
+                            {% else %}
+                            <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </main>
+</div>
+{% endblock %}

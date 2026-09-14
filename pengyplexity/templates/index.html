@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Pengyplexity{% endblock %}
+{% block body %}
+<div class="container py-5">
+    <h1 class="display-6">Pengyplexity</h1>
+    <p class="lead">A sandboxed, Perplexity-style research assistant.</p>
+    <p class="text-muted">
+        Web search + fetch, artifacts, and deep research — confined to your workspace.
+    </p>
+    <div class="mt-4">
+        <a href="{{ url_for('web.login') }}" class="btn btn-primary">Get started / Sign in</a>
+    </div>
+</div>
+{% endblock %}

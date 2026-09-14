@@ -1,0 +1,543 @@
+{% extends "base.html" %}
+{% block title %}{{ thread.title if thread else 'New Thread' }} — Pengyplexity{% endblock %}
+{% block body %}
+<div class="chat-layout">
+    <!-- Left sidebar: thread history -->
+    <aside class="chat-sidebar">
+        <div class="sidebar-header">
+            <h2 class="sidebar-title">🐧 Pengyplexity</h2>
+            <button id="new-thread-btn" class="btn btn-sm btn-outline" onclick="location.href='/chat/new'">
+                + New
+            </button>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="{{ url_for('web.workspace') }}" class="sidebar-nav-link">🗂 Workspace</a>
+            <a href="{{ url_for('web.memories') }}" class="sidebar-nav-link">🧠 Memories</a>
+            {% if current_user.get('is_admin') %}
+            <a href="{{ url_for('admin.list_users') }}" class="sidebar-nav-link">🛠 Admin</a>
+            {% endif %}
+        </nav>
+        <nav class="thread-list">
+            {% for t in threads %}
+            <div class="thread-item-row {% if t['_id'] == current_thread_id %}active{% endif %}">
+                <a href="{{ url_for('web.chat_view', thread_id=t['_id']) }}"
+                   class="thread-item {% if t['_id'] == current_thread_id %}active{% endif %}">
+                    <span class="thread-title">{{ t.title }}</span>
+                    <span class="thread-date">{{ t.updated.strftime('%Y-%m-%d') if t.updated else '' }}</span>
+                </a>
+                <form method="POST" action="{{ url_for('web.delete_thread', thread_id=t['_id']) }}"
+                      onsubmit="return confirm('Delete this chat?');" class="thread-delete-form">
+                    <button type="submit" class="thread-delete-btn" title="Delete chat" aria-label="Delete chat">×</button>
+                </form>
+            </div>
+            {% endfor %}
+        </nav>
+        <div class="sidebar-footer">
+            <span class="user-badge">{{ current_user['username'] }}</span>
+            <span class="sidebar-footer-actions">
+                <a href="{{ url_for('web.change_password') }}" class="btn btn-sm btn-outline">Account</a>
+                <form method="POST" action="{{ url_for('web.logout') }}" class="inline-form">
+                    <button type="submit" class="btn btn-sm btn-outline">Logout</button>
+                </form>
+            </span>
+        </div>
+    </aside>
+
+    <!-- Main chat pane -->
+    <main class="chat-main">
+        {% if thread %}
+        <div class="chat-header">
+            <h1 class="chat-header-title">{{ thread.title }}</h1>
+            {% if thread.messages %}
+            <form method="POST" action="{{ url_for('web.delete_thread', thread_id=thread['_id']) }}"
+                  onsubmit="return confirm('Delete this chat?');">
+                <button type="submit" class="btn btn-sm btn-outline btn-danger">Delete chat</button>
+            </form>
+            {% endif %}
+        </div>
+        {% endif %}
+        <div class="chat-messages" id="chat-messages">
+            {% for msg in (thread.messages if thread else []) %}
+            {% set msg_index = loop.index0 %}
+            <div class="message message-{{ msg.role }}">
+                <div class="message-avatar">{{ 'U' if msg.role == 'user' else 'A' }}</div>
+                <div class="message-body">
+                    <div class="message-content markdown-body">{{ msg.content }}</div>
+                    {% if msg.sources %}
+                    <div class="message-sources">
+                        <strong>Sources:</strong>
+                        <ul>
+                            {% for src in msg.sources %}
+                            <li><a href="{{ src.url }}" target="_blank" rel="noopener">{{ src.title }}</a></li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                    {% if artifacts and thread %}
+                    {% for art in artifacts %}
+                    {% if art.get('message_index') == msg_index %}
+                    {% if art.kind in ('chart', 'image') %}
+                    <div class="artifact artifact-inline">
+                        <img
+                            src="{{ url_for('web.download_artifact', thread_id=thread['_id'], artifact_id=art['_id'], inline=1) }}"
+                            alt="{{ art.filename }}"
+                            loading="lazy">
+                        <a class="artifact-link"
+                           href="{{ url_for('web.download_artifact', thread_id=thread['_id'], artifact_id=art['_id']) }}">{{ art.filename }}</a>
+                    </div>
+                    {% else %}
+                    <div class="artifact artifact-doc">
+                        <span class="artifact-label">{{ art.kind }}:</span>
+                        <a href="{{ url_for('web.download_artifact', thread_id=thread['_id'], artifact_id=art['_id']) }}">{{ art.filename }}</a>
+                    </div>
+                    {% endif %}
+                    {% endif %}
+                    {% endfor %}
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+            <!-- Streaming placeholder -->
+            <div class="message message-assistant streaming hidden" id="streaming-msg">
+                <div class="message-avatar">A</div>
+                <div class="message-body">
+                    <div class="message-content markdown-body" id="streaming-content"></div>
+                    <div class="activity-indicator" id="activity-indicator">
+                        <span class="spinner"></span> <span id="activity-text">Thinking...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Input box -->
+        <div class="chat-input-area">
+            <form id="ask-form" class="chat-input-form" method="POST"
+                  action="{{ url_for('web.ask', thread_id=thread['_id'] if thread else 'new') }}">
+                <textarea id="ask-input" name="question" class="form-control chat-input"
+                          rows="2" placeholder="Ask a question..." required></textarea>
+                <button type="submit" class="btn btn-primary" id="ask-btn"
+                        data-ask-label="Ask" data-stop-label="Stop">Ask</button>
+            </form>
+        </div>
+    </main>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+    'use strict';
+
+    // --- Safe Markdown renderer (dependency-free, client-side) -------------
+    // Renders a MINIMAL, safe subset of Markdown to HTML for the chat pane.
+    // All input is HTML-escaped BEFORE any constructs are applied, so model
+    // output can never inject live HTML/scripts.
+    function escapeHtml(s) {
+        return s.replace(/[&<>"']/g, function (c) {
+            return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+        });
+    }
+
+    function inline(md) {
+        // Code spans first (so their content isn't re-parsed).
+        var codes = [];
+        md = md.replace(/`([^`]+)`/g, function (_, code) {
+            codes.push(code);
+            return '\u0000' + (codes.length - 1) + '\u0000';
+        });
+        md = md.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        md = md.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+        // Images before links: `![alt](src)` also matches the link pattern,
+        // so a markdown image used to render as a link with a stray "!".
+        // Only http(s) and relative sources are honoured — the escaping above
+        // already neutralised markup, and this keeps `javascript:`/`data:`
+        // out of an attribute.
+        md = md.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, function (whole, alt, src) {
+            if (!/^(https?:\/\/|\/|\.)/.test(src)) return alt;
+            return '<img src="' + src + '" alt="' + alt + '" loading="lazy">';
+        });
+        md = md.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        md = md.replace(/\u0000(\d+)\u0000/g, function (_, i) {
+            return '<code>' + codes[+i] + '</code>';
+        });
+        return md;
+    }
+
+    function renderMarkdown(src) {
+        var text = escapeHtml(src == null ? '' : String(src));
+        var lines = text.split('\n');
+        var out = [];
+        var i = 0;
+        while (i < lines.length) {
+            var line = lines[i];
+            // Fenced code block
+            if (/^```/.test(line)) {
+                var buf = [];
+                i++;
+                while (i < lines.length && !/^```/.test(lines[i])) {
+                    buf.push(lines[i]); i++;
+                }
+                i++; // skip closing fence
+                out.push('<pre><code>' + buf.join('\n') + '</code></pre>');
+                continue;
+            }
+            if (/^\s*[-*+] /.test(line)) {
+                var items = [];
+                while (i < lines.length && /^\s*[-*+] /.test(lines[i])) {
+                    items.push('<li>' + inline(lines[i].replace(/^\s*[-*+] /, '')) + '</li>');
+                    i++;
+                }
+                out.push('<ul>' + items.join('') + '</ul>');
+                continue;
+            }
+            // Numbered list. Without this a "1. step" list rendered as a run
+            // of separate paragraphs still carrying their literal numbers.
+            if (/^\s*\d+[.)] /.test(line)) {
+                var olItems = [];
+                var startAt = parseInt(line.match(/^\s*(\d+)/)[1], 10);
+                while (i < lines.length && /^\s*\d+[.)] /.test(lines[i])) {
+                    olItems.push('<li>' + inline(lines[i].replace(/^\s*\d+[.)] /, '')) + '</li>');
+                    i++;
+                }
+                out.push('<ol start="' + startAt + '">' + olItems.join('') + '</ol>');
+                continue;
+            }
+            var h = line.match(/^(#{1,6})\s+(.*)$/);
+            if (h) {
+                var lvl = h[1].length;
+                out.push('<h' + lvl + '>' + inline(h[2]) + '</h' + lvl + '>');
+                i++;
+                continue;
+            }
+            if (/^\s*>\s?/.test(line)) {
+                var q = [];
+                while (i < lines.length && /^\s*>\s?/.test(lines[i])) {
+                    q.push(inline(lines[i].replace(/^\s*>\s?/, '')));
+                    i++;
+                }
+                out.push('<blockquote>' + q.join('<br>') + '</blockquote>');
+                continue;
+            }
+            // Table (basic: header row + separator row)
+            if (i + 1 < lines.length && lines[i].indexOf('|') >= 0 && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1])) {
+                var headerCells = lines[i].split('|').map(function(c){return c.trim();}).filter(Boolean);
+                var rows = [];
+                i += 2;
+                while (i < lines.length && lines[i].indexOf('|') >= 0) {
+                    var cells = lines[i].split('|').map(function(c){return c.trim();}).filter(Boolean);
+                    rows.push('<tr>' + cells.map(function(c){return '<td>'+inline(c)+'</td>';}).join('') + '</tr>');
+                    i++;
+                }
+                out.push('<table><thead><tr>' + headerCells.map(function(c){return '<th>'+inline(c)+'</th>';}).join('') + '</tr></thead><tbody>' + rows.join('') + '</tbody></table>');
+                continue;
+            }
+            if (line.trim() === '') { i++; continue; }
+            out.push('<p>' + inline(line) + '</p>');
+            i++;
+        }
+        return out.join('\n');
+    }
+
+    function renderInto(el) {
+        el.innerHTML = renderMarkdown(el.textContent);
+    }
+
+    // Re-render all existing Markdown content on load.
+    document.querySelectorAll('.message-content.markdown-body').forEach(renderInto);
+
+    // --- SSE streaming ------------------------------------------------
+    var form = document.getElementById('ask-form');
+    var input = document.getElementById('ask-input');
+    var btn = document.getElementById('ask-btn');
+    var messagesEl = document.getElementById('chat-messages');
+    var streamMsg = document.getElementById('streaming-msg');
+    var streamContent = document.getElementById('streaming-content');
+    var activity = document.getElementById('activity-indicator');
+    var activityText = document.getElementById('activity-text');
+
+    if (!form) return;
+
+    // Enter submits the question; Shift+Enter inserts a newline.
+    input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (typeof form.requestSubmit === 'function') {
+                form.requestSubmit();
+            } else {
+                form.dispatchEvent(new Event('submit', {cancelable: true}));
+            }
+        }
+    });
+
+    var turnArtifacts = [];
+    var turnSources = [];
+    // Non-null only while a turn is in flight. Doubles as the "are we
+    // running?" flag the Ask/Stop button switches on.
+    var controller = null;
+    var stopping = false;
+
+    function setRunning(running) {
+        // One button, two jobs: Ask while idle, Stop while the agent works.
+        // A separate Stop button would sit dead most of the time and push the
+        // Ask button around when it appeared.
+        btn.textContent = running
+            ? btn.dataset.stopLabel
+            : btn.dataset.askLabel;
+        btn.classList.toggle('btn-stop', running);
+        btn.classList.toggle('btn-primary', !running);
+        btn.disabled = false;
+        input.disabled = running;
+    }
+
+    function stopTurn() {
+        if (!controller) return;
+        stopping = true;
+        btn.disabled = true;
+        activityText.textContent = 'Stopping...';
+        // Tell the server first: aborting alone only drops our end of the
+        // connection, and the agent may be blocked in a sandbox run or a
+        // model call that nothing would otherwise interrupt.
+        var url = form.action.replace(/\/ask$/, '/stop');
+        fetch(url, {
+            method: 'POST',
+            headers: {'Accept': 'application/json'}
+        }).catch(function () {
+            /* Aborting below stops the UI regardless. */
+        }).then(function () {
+            if (controller) controller.abort();
+        });
+    }
+    function renderSources(sources) {
+        var div = document.createElement('div');
+        div.className = 'message-sources';
+        var strong = document.createElement('strong');
+        strong.textContent = 'Sources:';
+        div.appendChild(strong);
+        var ul = document.createElement('ul');
+        sources.forEach(function (src) {
+            var li = document.createElement('li');
+            var a = document.createElement('a');
+            a.href = src.url;
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.textContent = src.title || src.url;
+            li.appendChild(a);
+            ul.appendChild(li);
+        });
+        div.appendChild(ul);
+        return div;
+    }
+    function renderArtifact(art) {
+        var div = document.createElement('div');
+        div.className = 'artifact' + ((art.kind === 'chart' || art.kind === 'image') ? ' artifact-inline' : ' artifact-doc');
+        if (art.kind === 'chart' || art.kind === 'image') {
+            var img = document.createElement('img');
+            img.src = art.url;
+            img.alt = art.filename || '';
+            img.loading = 'lazy';
+            div.appendChild(img);
+            var link = document.createElement('a');
+            link.className = 'artifact-link';
+            link.href = art.download_url || art.url;
+            link.textContent = art.filename || '';
+            div.appendChild(link);
+        } else {
+            var label = document.createElement('span');
+            label.className = 'artifact-label';
+            label.textContent = art.kind + ':';
+            div.appendChild(label);
+            div.appendChild(document.createTextNode(' '));
+            var link2 = document.createElement('a');
+            link2.href = art.download_url || art.url;
+            link2.textContent = art.filename || '';
+            div.appendChild(link2);
+        }
+        return div;
+    }
+    function applyTitle(title) {
+        // The thread was just auto-named from the first question (server
+        // side, before the stream started) — reflect it in the sidebar
+        // entry, the header, and the tab title without a page reload.
+        var activeLink = document.querySelector('.thread-item.active .thread-title');
+        if (activeLink) activeLink.textContent = title;
+        var headerTitle = document.querySelector('.chat-header-title');
+        if (headerTitle) headerTitle.textContent = title;
+        document.title = title + ' — Pengyplexity';
+    }
+    function addActivity(label) {
+        if (!label) return;
+        activityText.textContent = label || 'Working...';
+        activity.style.display = '';
+    }
+    function hideActivity() {
+        activity.style.display = 'none';
+    }
+    function scrollDown() {
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        // The button is Stop while a turn is running, and it is still this
+        // form's submit button, so the click arrives here.
+        if (controller) {
+            stopTurn();
+            return;
+        }
+        var question = input.value.trim();
+        if (!question) return;
+
+        // Show the user's message.
+        var userMsg = document.createElement('div');
+        userMsg.className = 'message message-user';
+        userMsg.innerHTML = '<div class="message-avatar">U</div><div class="message-body">' +
+            '<div class="message-content">' + escapeHtml(question) + '</div></div>';
+        messagesEl.appendChild(userMsg);
+
+        // The streaming placeholder is a single, reused DOM node. Move it to
+        // the end of the message list (appendChild on an existing node moves
+        // it) so it sits right after the question that was just asked,
+        // instead of staying pinned wherever it was left after the previous
+        // turn finalized its answer below it.
+        messagesEl.appendChild(streamMsg);
+
+        // Reset the streaming placeholder.
+        streamContent.textContent = '';
+        turnArtifacts = [];
+        turnSources = [];
+        streamMsg.classList.remove('hidden');
+        addActivity('Thinking...');
+        stopping = false;
+        controller = new AbortController();
+        setRunning(true);
+        scrollDown();
+
+        var q = new URLSearchParams();
+        q.set('question', question);
+
+        // Declared out here, not inside the fetch callback: a stopped turn
+        // finalizes from the abort handler and needs the same text.
+        var answerText = '';
+        var gotAny = false;
+
+        var finalized = false;
+        function finalize() {
+            // Aborting can both end the reader loop and reject the fetch
+            // promise, so this runs at most once per turn.
+            if (finalized) return;
+            finalized = true;
+            streamMsg.classList.add('hidden');
+            if (!gotAny && !answerText) {
+                answerText = streamContent.textContent;
+            }
+            if (stopping) {
+                // Mirrors what the server persisted, so a reload shows the
+                // same thing this page is showing.
+                answerText = (answerText ? answerText + '\n\n' : '') + '_[Stopped]_';
+            }
+            if (answerText || turnArtifacts.length) {
+                var a = document.createElement('div');
+                a.className = 'message message-assistant';
+                a.innerHTML = '<div class="message-avatar">A</div>' +
+                    '<div class="message-body"><div class="message-content markdown-body"></div></div>';
+                a.querySelector('.message-content').textContent = answerText;
+                renderInto(a.querySelector('.message-content'));
+                var msgBody = a.querySelector('.message-body');
+                if (turnSources.length) {
+                    msgBody.appendChild(renderSources(turnSources));
+                }
+                turnArtifacts.forEach(function (art) {
+                    msgBody.appendChild(renderArtifact(art));
+                });
+                messagesEl.appendChild(a);
+            }
+            hideActivity();
+            controller = null;
+            stopping = false;
+            setRunning(false);
+            input.value = '';
+            scrollDown();
+        }
+
+        fetch(form.action + '?stream=1', {
+            method: 'POST',
+            headers: {'Accept': 'text/event-stream', 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'},
+            body: q.toString(),
+            signal: controller.signal
+        }).then(function (resp) {
+            if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
+            var reader = resp.body.getReader();
+            var decoder = new TextDecoder();
+            var buffer = '';
+
+            function processEvent(ev) {
+                var eventType = '';
+                var dataStr = '';
+                ev.split('\n').forEach(function (line) {
+                    if (line.indexOf('event: ') === 0) eventType = line.slice(7);
+                    else if (line.indexOf('data: ') === 0) dataStr = line.slice(6);
+                });
+                if (!dataStr) return;
+                var data;
+                try { data = JSON.parse(dataStr); } catch (err) { return; }
+                if (eventType === 'activity' && data.label) {
+                    addActivity(data.label);
+                } else if (eventType === 'activity') {
+                    addActivity('Working...');
+                } else if (eventType === 'token' && data.content !== undefined) {
+                    gotAny = true;
+                    hideActivity();
+                    answerText += data.content;
+                    streamContent.textContent = answerText;
+                    renderInto(streamContent);
+                    scrollDown();
+                } else if (eventType === 'artifact') {
+                    turnArtifacts.push(data);
+                } else if (eventType === 'title' && data.title) {
+                    applyTitle(data.title);
+                } else if (eventType === 'done') {
+                    hideActivity();
+                    if (data.sources && data.sources.length) {
+                        turnSources = data.sources;
+                    }
+                } else if (eventType === 'error' && data.message) {
+                    hideActivity();
+                    streamContent.textContent = '⚠ ' + data.message;
+                }
+            }
+
+            function handle() {
+                return reader.read().then(function (r) {
+                    if (r.done) {
+                        // Convert the streaming placeholder into a real
+                        // assistant message.
+                        finalize();
+                        return;
+                    }
+                    buffer += decoder.decode(r.value, {stream: true});
+                    var idx;
+                    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+                        var ev = buffer.slice(0, idx);
+                        buffer = buffer.slice(idx + 2);
+                        processEvent(ev);
+                    }
+                    return handle();
+                });
+            }
+            return handle();
+        }).catch(function (err) {
+            if (stopping || err.name === 'AbortError') {
+                // Expected: we aborted the request ourselves. Keep whatever
+                // the model had already written.
+                finalize();
+                return;
+            }
+            hideActivity();
+            streamContent.textContent = '⚠ ' + err.message;
+            streamMsg.classList.remove('hidden');
+            controller = null;
+            setRunning(false);
+        });
+    });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Memories — Pengyplexity{% endblock %}
+{% block body %}
+<div class="admin-layout">
+    <aside class="admin-sidebar">
+        <div class="sidebar-header">
+            <h2 class="sidebar-title">🐧 Pengyplexity</h2>
+        </div>
+        <nav class="admin-nav">
+            <a href="{{ url_for('web.chat_index') }}" class="thread-item">← Back to Chat</a>
+            <a href="{{ url_for('web.workspace') }}" class="thread-item">🗂 Workspace</a>
+            <a href="{{ url_for('web.memories') }}" class="thread-item active">🧠 Memories</a>
+            {% if current_user.get('is_admin') %}
+            <a href="{{ url_for('admin.list_users') }}" class="thread-item">User Management</a>
+            <a href="{{ url_for('admin.settings') }}" class="thread-item">Settings</a>
+            {% endif %}
+        </nav>
+        <div class="sidebar-footer">
+            <span class="user-badge">{{ current_user['username'] }}</span>
+            <span class="sidebar-footer-actions">
+                <a href="{{ url_for('web.change_password') }}" class="btn btn-sm btn-outline">Account</a>
+                <form method="POST" action="{{ url_for('web.logout') }}" class="inline-form">
+                    <button type="submit" class="btn btn-sm btn-outline">Logout</button>
+                </form>
+            </span>
+        </div>
+    </aside>
+
+    <main class="admin-main">
+        <h1>Memories</h1>
+        <p class="text-muted memories-intro">
+            Facts the assistant has saved (or you've added) so it can recall them in future
+            conversations. Search is hybrid: keyword + semantic, and only shows memories
+            that actually match.
+        </p>
+
+        {% if error %}
+        <div class="alert alert-danger">{{ error }}</div>
+        {% endif %}
+        {% if success %}
+        <div class="alert alert-success">{{ success }}</div>
+        {% endif %}
+
+        <div class="admin-card">
+            <form method="GET" action="{{ url_for('web.memories') }}" class="memory-search-form">
+                <input type="text" name="q" class="form-control" placeholder="Search memories…" value="{{ query }}">
+                <button type="submit" class="btn btn-primary">Search</button>
+                {% if query %}
+                <a href="{{ url_for('web.memories') }}" class="btn btn-outline">Clear</a>
+                {% endif %}
+            </form>
+        </div>
+
+        <div class="admin-card">
+            <h2>Add a memory</h2>
+            <form method="POST" action="{{ url_for('web.memories') }}">
+                <div class="form-row">
+                    <div class="form-group" style="flex: 1 1 220px;">
+                        <label for="mem-title">Title</label>
+                        <input type="text" id="mem-title" name="title" required class="form-control" placeholder="short title">
+                    </div>
+                    <div class="form-group" style="flex: 2 1 320px;">
+                        <label for="mem-tags">Tags (comma-separated)</label>
+                        <input type="text" id="mem-tags" name="tags" class="form-control" placeholder="e.g. preferences, project-x">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="mem-summary">Summary</label>
+                    <input type="text" id="mem-summary" name="summary" required class="form-control" placeholder="1-2 sentence summary (this is what search matches on)">
+                </div>
+                <div class="form-group">
+                    <label for="mem-body">Details (optional)</label>
+                    <textarea id="mem-body" name="body" class="form-control" rows="3" placeholder="longer detail, optional"></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">Save memory</button>
+            </form>
+        </div>
+
+        <div class="admin-card">
+            <h2>{{ 'Search results' if query else 'All memories' }} ({{ memories|length }})</h2>
+            {% if found and found.filtered %}
+            <p class="text-muted memory-denominator">
+                {{ found.surfaced }} of {{ found.examined }} candidate{{ '' if found.examined == 1 else 's' }}
+                cleared the relevance floor, out of {{ found.corpus }} saved.
+            </p>
+            {% endif %}
+            {% if not memories %}
+            <p class="text-muted">{{ 'No memories match that search.' if query else 'No memories saved yet.' }}</p>
+            {% endif %}
+            {% if found and found.advisory %}
+            <p class="text-muted memory-advisory">{{ found.advisory }}</p>
+            {% endif %}
+            {% if query and not show_all %}
+            <p class="text-muted">
+                <a href="{{ url_for('web.memories', q=query, all=1) }}">Show near misses</a>
+                — every memory ranked, floor removed.
+            </p>
+            {% elif query and show_all %}
+            <p class="text-muted">
+                Showing every memory ranked, with no relevance floor.
+                <a href="{{ url_for('web.memories', q=query) }}">Back to matches only</a>
+            </p>
+            {% endif %}
+            {% for m in memories %}
+            <div class="memory-item">
+                <div class="memory-item-header">
+                    <span class="memory-item-title">{{ m.title }}</span>
+                    {% if m.status != 'active' %}
+                    <span class="badge badge-disabled">{{ m.status }}</span>
+                    {% endif %}
+                    {% if signals and signals.get(m['_id']) %}
+                    {% set sig = signals[m['_id']] %}
+                    <span class="badge badge-match badge-match-{{ sig.confidence }}"
+                          title="Semantic similarity to your query">{{ '%.2f'|format(sig.signal) }}</span>
+                    {% endif %}
+                </div>
+                <p class="memory-item-summary">{{ m.summary }}</p>
+                {% if m.tags %}
+                <div class="memory-item-tags">
+                    {% for tag in m.tags %}<span class="memory-tag">{{ tag }}</span>{% endfor %}
+                </div>
+                {% endif %}
+                <div class="memory-item-actions">
+                    <a href="{{ url_for('web.edit_memory', memory_id=m['_id']) }}" class="btn btn-sm btn-outline">Edit</a>
+                    <form method="POST" action="{{ url_for('web.delete_memory', memory_id=m['_id']) }}" class="inline-form"
+                          onsubmit="return confirm('Delete this memory?');">
+                        <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </main>
+</div>
+{% endblock %}
