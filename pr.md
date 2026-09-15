@@ -44,8 +44,9 @@ get a working instance without network access to anything but their model.
 - `.gitignore` — Python/venv/secrets/runtime-state/caches, with `.env.example`
   explicitly *not* ignored.
 - `.env.example` — documented template for all `PENGYPLEXITY_*` settings.
-- `README.md` — extended with install, systemd service, nginx+HTTPS deployment,
-  operating, and troubleshooting sections.
+- `README.md` — rewritten as a short, marketing-oriented front page; the detail
+  is split out into `SPEC.md` (engineering spec) and `INSTALLING.md`
+  (install + operate).
 - `pyproject.toml` — added authors, license, keywords and classifiers.
 
 ## How to test
@@ -53,7 +54,7 @@ get a working instance without network access to anything but their model.
 ```bash
 # Offline test suite — no network, no live bwrap needed
 uv sync
-uv run pytest                 # expect: 574 passed, 1 skipped
+uv run pytest                 # expect: 580 passed, 1 skipped
 
 # End-to-end, minimal
 uv run python -m pengyplexity.cli create-admin admin --password 'changeme'
@@ -88,10 +89,18 @@ manual check, not just unit tests).
   Wendorf <dungeons@gmail.com>`, per request.
 - **`uv.lock` is committed on purpose.** This is an application, not a library:
   a reproducible resolved dependency set is worth more than a floating range.
-- **The README is under test** (`tests/test_readme.py` asserts it documents the
-  safety model, the config keys, bootstrap, `flask --app`, and the offline
-  suite). Any doc rewrite has to keep those strings — they are treated as part
-  of the deliverable, not as incidental prose.
+- **Docs are split three ways.** A 600-line README buried the pitch, which is
+  the one job a front page has. The content was *moved verbatim* (scripted, not
+  retyped) into `SPEC.md` and `INSTALLING.md` so nothing was lost in transit.
+  The README keeps the pitch, the screenshot, a safety-at-a-glance summary and a
+  quick start, and links out for the rest.
+- **The docs are under test.** `tests/test_readme.py` asserts the documentation
+  *contract*: the README stays a front door (<=200 lines) while still naming the
+  safety model and quick start; the safety detail genuinely lives in `SPEC.md`
+  (the bwrap argv, `--clearenv`, the confinement error type, forbidden tools);
+  `INSTALLING.md` covers service/nginx/renewal/troubleshooting; and all three
+  cross-link. It was **retargeted** for the split, not relaxed — it gained
+  assertions rather than losing them, so the guard is stronger than before.
 - **Version stays `0.1.0`** in `pyproject.toml` and the changelog's first entry.
   Classified `Development Status :: 4 - Beta` (deployed and green, but no
   external users yet) — say the word if you'd rather this be `3 - Alpha`.
@@ -113,7 +122,7 @@ manual check, not just unit tests).
 
 ## Checklist
 
-- [x] Offline suite green (`574 passed, 1 skipped`)
+- [x] Offline suite green (`580 passed, 1 skipped`)
 - [x] No secrets committed (`.env` ignored; only `.env.example` is tracked)
 - [x] License present and declared in `pyproject.toml`
 - [x] Changelog seeded

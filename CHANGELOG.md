@@ -47,12 +47,19 @@ first-class tool — all inside a deliberately locked-down sandbox.
   an active/superseded/deprecated lifecycle.
 - **Admin settings** — most tunables are overridable at runtime from
   `/admin/settings` without a restart; env vars are the startup default.
-- **Tests** — an offline pytest suite (574 passing, 1 skipped when `reportlab`
+- **Tests** — an offline pytest suite (580 passing, 1 skipped when `reportlab`
   is absent) with fakes for the model, search, sandbox runner, sharing and
-  image backends. No network and no live `bwrap` required.
-- **Docs & repo hygiene** — README (architecture, safety model, configuration,
-  install, service, nginx deployment, operating, troubleshooting), an
-  `.env.example` template, this changelog, and the MIT license.
+  image backends. No network and no live `bwrap` required. Includes
+  `test_readme.py`, which asserts the documentation contract (the README stays a
+  front door, and the detail lives in `SPEC.md` / `INSTALLING.md`).
+- **Docs & repo hygiene** — three documents with three jobs: a short,
+  marketing-oriented **README** (pitch, screenshot, safety at a glance, quick
+  start, links out), **SPEC.md** for the engineering detail (architecture, the
+  safety model in full, features, routes, data model, every setting,
+  non-goals), and **INSTALLING.md** for installing and operating (requirements,
+  first run, systemd service, nginx + Let's Encrypt, day-to-day operation,
+  troubleshooting). Plus an `.env.example` template, this changelog, and the
+  MIT license.
 
 ### Security
 
