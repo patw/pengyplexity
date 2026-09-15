@@ -33,9 +33,23 @@ secrets.json
 # ── Pengyplexity runtime state (stores, workspaces, artifacts) ────────────
 # Per-user data lives under PENGYPLEXITY_DATA_DIR (~/.pengyplexity by default,
 # outside the repo) — these patterns catch an in-repo data dir.
+#
+# The moofile stores (users / memories / threads / settings / artifacts /
+# shares) are the sensitive ones: users.bson holds password hashes and
+# settings.bson can hold the model API key. moofile writes each as a lowercase
+# `<collection>.bson` plus .cache / .lock / .meta sidecars beside it, so all of
+# those forms are covered below, at any depth.
+#
+# Matching is case-sensitive, so the patterns use character classes to also
+# catch a store that arrives from a backup or a case-insensitive filesystem
+# (USERS.BSON, Users.Bson, ...).
+#
+# Residual gap, deliberately not papered over with speculative patterns: a store
+# renamed through PENGYPLEXITY_STORE to some other extension (e.g. `store.db`)
+# is NOT matched here. Keep the .bson extension, or add that path explicitly.
 .pengyplexity/
-*.bson
-*.bson.*
+*.[Bb][Ss][Oo][Nn]
+*.[Bb][Ss][Oo][Nn].*
 workspaces/
 artifacts/
 

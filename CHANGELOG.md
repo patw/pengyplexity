@@ -47,11 +47,13 @@ first-class tool — all inside a deliberately locked-down sandbox.
   an active/superseded/deprecated lifecycle.
 - **Admin settings** — most tunables are overridable at runtime from
   `/admin/settings` without a restart; env vars are the startup default.
-- **Tests** — an offline pytest suite (580 passing, 1 skipped when `reportlab`
+- **Tests** — an offline pytest suite (584 passing, 1 skipped when `reportlab`
   is absent) with fakes for the model, search, sandbox runner, sharing and
   image backends. No network and no live `bwrap` required. Includes
   `test_readme.py`, which asserts the documentation contract (the README stays a
-  front door, and the detail lives in `SPEC.md` / `INSTALLING.md`).
+  front door, and the detail lives in `SPEC.md` / `INSTALLING.md`), and
+  `test_gitignore.py`, which asserts that no moofile store — including its
+  `.cache` / `.lock` / `.meta` sidecars and case variants — is ever committable.
 - **Docs & repo hygiene** — three documents with three jobs: a short,
   marketing-oriented **README** (pitch, screenshot, safety at a glance, quick
   start, links out), **SPEC.md** for the engineering detail (architecture, the

@@ -54,7 +54,7 @@ get a working instance without network access to anything but their model.
 ```bash
 # Offline test suite — no network, no live bwrap needed
 uv sync
-uv run pytest                 # expect: 580 passed, 1 skipped
+uv run pytest                 # expect: 584 passed, 1 skipped
 
 # End-to-end, minimal
 uv run python -m pengyplexity.cli create-admin admin --password 'changeme'
@@ -122,7 +122,7 @@ manual check, not just unit tests).
 
 ## Checklist
 
-- [x] Offline suite green (`580 passed, 1 skipped`)
+- [x] Offline suite green (`584 passed, 1 skipped`)
 - [x] No secrets committed (`.env` ignored; only `.env.example` is tracked)
 - [x] License present and declared in `pyproject.toml`
 - [x] Changelog seeded
