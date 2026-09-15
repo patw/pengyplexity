@@ -217,6 +217,11 @@ class AuthService:
         user = self.store.get_user_by_id(user_id)
         if user is None:
             raise UserNotFoundError("User not found")
+        # Keys already stop working once their owner is gone (every API
+        # request re-reads the user), but a dead credential should not linger
+        # in the store either.
+        if hasattr(self.store, "delete_api_keys_for_user"):
+            self.store.delete_api_keys_for_user(user_id)
         return self.store.delete_user(user_id)
 
 

@@ -9,6 +9,7 @@ Three documents, three jobs:
     INSTALLING.md  — installing and operating: requirements, first run, the systemd
                      service, nginx + Let's Encrypt, day-to-day operation, and
                      troubleshooting.
+    API.md         — the JSON API reference for programs (bots, scripts).
 
 The split is deliberate — a 600-line README buries the pitch, which is the one
 thing a front page has to do. So these tests assert the *contract* of that split
@@ -28,6 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 README = ROOT / "README.md"
 SPEC = ROOT / "SPEC.md"
 INSTALLING = ROOT / "INSTALLING.md"
+API = ROOT / "API.md"
 
 # A front-door README that has grown back into a manual has failed at its job.
 README_MAX_LINES = 200
@@ -131,6 +133,28 @@ def test_installing_covers_install_and_operate():
     assert "proxy_buffering off" in t  # else SSE stops streaming
     assert "certbot" in t
     assert "Troubleshooting" in t
+
+
+# ── The API reference ──────────────────────────────────────────────────────
+
+
+def test_api_doc_covers_the_client_contract():
+    """What a bot author needs: how to authenticate, what to call, what comes back."""
+    t = _text(API)
+    assert "Authorization: Bearer" in t
+    assert "/api/v1" in t
+    assert "POST /api/v1/threads/<id>/messages" in t
+    for event in ("token", "done", "artifact", "message"):
+        assert f"`{event}`" in t, f"API.md no longer documents the {event} event"
+    for code in ("turn_in_progress", "rate_limited", "too_many_concurrent_turns"):
+        assert code in t, f"API.md no longer documents {code}"
+    assert "PENGYPLEXITY_API_RATE_LIMIT" in t
+
+
+def test_api_doc_is_linked_both_ways():
+    readme, spec, api = _text(README), _text(SPEC), _text(API)
+    assert "API.md" in readme and "API.md" in spec
+    assert "README.md" in api and "SPEC.md" in api
 
 
 def test_docs_cross_link():

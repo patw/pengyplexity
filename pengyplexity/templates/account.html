@@ -63,6 +63,71 @@
                 <button type="submit" class="btn btn-primary btn-block">Update password</button>
             </form>
         </div>
+
+        <div class="login-card" id="api-keys">
+            <h1 class="login-title">API keys</h1>
+            <p class="login-subtitle">
+                Let a program — a bot, a script — use Pengyplexity as you through the
+                JSON API at <code>{{ api_base }}</code>. Send a key as
+                <code>Authorization: Bearer &lt;key&gt;</code>.
+            </p>
+            {% if api_key_error %}
+            <div class="alert alert-danger">{{ api_key_error }}</div>
+            {% endif %}
+            {% if api_key_success %}
+            <div class="alert alert-success">{{ api_key_success }}</div>
+            {% endif %}
+            {% if new_api_key %}
+            <div class="alert alert-success api-key-new">
+                <strong>Copy this key now — it will not be shown again.</strong>
+                <div class="api-key-reveal">
+                    <code id="new-api-key">{{ new_api_key }}</code>
+                    <button type="button" class="btn btn-sm btn-outline" data-copy-target="new-api-key">Copy</button>
+                </div>
+            </div>
+            {% endif %}
+            <form method="POST" action="{{ url_for('web.create_api_key') }}">
+                <div class="form-group">
+                    <label for="api-key-name">Key name</label>
+                    <input type="text" id="api-key-name" name="name" maxlength="64"
+                           class="form-control" placeholder="e.g. discord-bot">
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Create API key</button>
+            </form>
+            {% if api_keys %}
+            <div class="table-scroll api-key-list">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Key</th>
+                        <th>Created</th>
+                        <th>Last used</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for k in api_keys %}
+                    <tr>
+                        <td>{{ k['name'] }}</td>
+                        <td><code>{{ k['display_prefix'] }}…</code></td>
+                        <td>{{ k['created'].strftime('%Y-%m-%d %H:%M') if k.get('created') else '—' }}</td>
+                        <td>{{ k['last_used'].strftime('%Y-%m-%d %H:%M') if k.get('last_used') else 'Never' }}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('web.revoke_api_key', key_id=k['_id']) }}" class="inline-form"
+                                  onsubmit="return confirm('Revoke API key {{ k['name'] }}? Programs using it will stop working.')">
+                                <button type="submit" class="btn btn-sm btn-danger">Revoke</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            </div>
+            {% else %}
+            <p class="text-muted api-key-list">No API keys yet.</p>
+            {% endif %}
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -94,6 +159,20 @@
 
     form.querySelectorAll('input[type="radio"]').forEach(function (input) {
         input.addEventListener('change', applyPreview);
+    });
+})();
+
+(function () {
+    'use strict';
+    // Copy a freshly created API key to the clipboard.
+    document.querySelectorAll('[data-copy-target]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            var target = document.getElementById(button.getAttribute('data-copy-target'));
+            if (!target || !navigator.clipboard) return;
+            navigator.clipboard.writeText(target.textContent.trim()).then(function () {
+                button.textContent = 'Copied';
+            });
+        });
     });
 })();
 </script>

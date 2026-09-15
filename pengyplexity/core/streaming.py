@@ -155,53 +155,67 @@ def make_sse_response(generator: Generator[str, None, None]):
 # ---------------------------------------------------------------------------
 
 
-def agent_stream(
+def agent_events(
     agent,
     user_message: str,
     history: Optional[List[Dict[str, Any]]] = None,
-) -> Generator[str, None, None]:
-    """Run the agent and yield SSE-formatted events.
+) -> Generator[StreamEvent, None, None]:
+    """Run the agent and yield :class:`StreamEvent` objects.
 
     If the agent exposes a streaming answer path (``run_stream``), the
     generator emits an ``activity`` event, then ``token`` events as the model
     produces the final answer, then a ``done`` event with the full answer +
     sources. If the agent does not stream, it falls back to running
     ``agent.run`` and emitting the whole answer as a single ``token`` event.
+
+    Structured rather than pre-rendered so a consumer that is not writing SSE
+    — the JSON API's non-streaming mode — reads the events directly instead
+    of parsing wire text back apart.
     """
     # Signal that work has started.
-    yield sse_activity("Thinking...")
+    yield StreamEvent("activity", {"type": "activity", "label": "Thinking..."})
 
     try:
-        # Prefer the streaming path so tokens reach the browser live.
+        # Prefer the streaming path so tokens reach the client live.
         if hasattr(agent, "run_stream"):
             collected: List[str] = []
             for ev in agent.run_stream(user_message, history=history):
                 if getattr(ev, "kind", None) == "activity":
-                    yield sse_activity(
-                        ev.data.get("label", "Working…"),
-                        type="tool",
-                    )
+                    yield StreamEvent("activity", {
+                        "type": "tool",
+                        "label": ev.data.get("label", "Working…"),
+                    })
                 else:
                     content = ev.data.get("content") if isinstance(ev.data, dict) else ev
                     if isinstance(content, str):
                         collected.append(content)
-                        yield sse_token(content)
+                        yield StreamEvent("token", {"content": content})
             answer = "".join(collected)
         else:
             result = agent.run(user_message, history=history)
             answer = result.answer
             sources = result.sources
             if answer:
-                yield sse_token(answer)
-            yield sse_done(answer, sources)
+                yield StreamEvent("token", {"content": answer})
+            yield StreamEvent("done", {"answer": answer, "sources": sources or []})
             return
     except Exception as e:
-        yield sse_error(str(e))
+        yield StreamEvent("error", {"message": str(e)})
         return
 
     # Final event with full data.
     sources = getattr(agent, "_last_sources", None) or []
-    yield sse_done(answer, sources)
+    yield StreamEvent("done", {"answer": answer, "sources": sources})
+
+
+def agent_stream(
+    agent,
+    user_message: str,
+    history: Optional[List[Dict[str, Any]]] = None,
+) -> Generator[str, None, None]:
+    """:func:`agent_events`, rendered as SSE wire text."""
+    for event in agent_events(agent, user_message, history=history):
+        yield event.to_sse()
 
 
 # ---------------------------------------------------------------------------

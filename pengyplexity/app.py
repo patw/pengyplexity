@@ -48,6 +48,10 @@ class AppState:
     # separate request on a separate thread — can interrupt it. See
     # core/cancel.py.
     cancels: CancelRegistry = field(default_factory=CancelRegistry)
+    # Personal API keys for /api/v1 (core/apikeys.py) and the per-user turn
+    # rate limiter that guards it (core/ratelimit.py).
+    api_keys: object | None = None
+    api_rate_limiter: object | None = None
 
     def __post_init__(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -116,10 +120,14 @@ def create_app(config_overrides: dict | None = None, cfg: Config | None = None) 
     # Wire up the store (real moofile-backed) and auth service.
     # Tests can swap state.store / state.auth / state.agent for fakes.
     from .core.store import Store
+    from .core.apikeys import ApiKeyService
     from .core.auth import AuthService
+    from .core.ratelimit import RateLimiter
 
     state.store = Store(config.store_file.parent)
     state.auth = AuthService(store=state.store)
+    state.api_keys = ApiKeyService(store=state.store)
+    state.api_rate_limiter = RateLimiter(config.api_rate_limit)
 
     # Build the production tool loop (model + search + sandbox) so the chat
     # endpoint answers real questions out of the box. Tests that inject a fake
@@ -280,5 +288,7 @@ def register_blueprints(app: Flask) -> None:
     """
     from .web import web_bp
     from .admin import admin_bp
+    from .api import api_bp
     app.register_blueprint(web_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(api_bp)

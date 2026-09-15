@@ -7,7 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **JSON API at `/api/v1`** — the groundwork for a Discord bot. A program can
+  do everything a user does in the chat UI: create, list, rename and delete
+  threads; ask questions with a plain JSON reply or an SSE stream; stop a
+  running turn; download artifacts; and manage memories. Errors are always
+  JSON with a stable `code`. Full reference in the new **API.md**, linked
+  from the README.
+- **Personal API keys** — created and revoked on the Account page. A key is
+  shown once and only its SHA-256 hash is stored. A key acts as its user and
+  stops working the moment that user is disabled or deleted. Keys can revoke
+  keys (including themselves) but cannot create them.
+- **API admission limits** — per-user questions per minute
+  (`PENGYPLEXITY_API_RATE_LIMIT`, default 30) and threads answering at once
+  (`PENGYPLEXITY_API_MAX_CONCURRENT_TURNS`, default 4). Asking in a thread
+  that is already answering returns `409` instead of silently cancelling the
+  running turn. Every refusal happens before anything is written.
+
+### Changed
+
+- The chat turn lifecycle moved from `web.py` into `turns.py`, and the browser
+  and the API now share it, so the two cannot drift apart.
+- A streamed turn that fails before producing any text no longer saves an
+  empty assistant message. If it fails partway, the partial answer is saved
+  with an `_[Error]_` note.
+- If no agent is configured, a streamed question is no longer written to the
+  thread.
 
 ## [0.1.0] - 2026-09-14
 

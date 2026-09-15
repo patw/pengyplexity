@@ -34,6 +34,7 @@ STORE_NAMES = [
     "settings.bson",
     "artifacts.bson",
     "shares.bson",
+    "api_keys.bson",
     "pengyplexity.bson",
     "USERS.BSON",
     "Users.Bson",

@@ -49,6 +49,10 @@ body {
     max-width: 400px;
 }
 .account-stack .login-card { width: 100%; max-width: none; }
+.account-stack code { overflow-wrap: anywhere; }
+.api-key-reveal { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .5rem; }
+.api-key-reveal code { flex: 1 1 12rem; padding: .35rem .5rem; border-radius: 4px; background: var(--code-bg); color: var(--code-fg); font-size: .85rem; }
+.api-key-list { margin-top: 1.25rem; }
 .account-topnav-back {
     position: fixed;
     top: 1.25rem;

@@ -42,6 +42,9 @@ inside the sandbox.
   per-user themes (3 modes × 8 accents), and an admin settings panel that changes
   most behaviour live, with no restart.
 - **Share anything** — push an answer or an image straight to a shareable link.
+- **A JSON API for your own tools** — create an API key on your Account page
+  and a bot or script gets the same agent over HTTP: threads, streamed
+  answers, artifacts, memories. See **[API.md](API.md)**.
 
 ---
 
@@ -113,6 +116,7 @@ non-goal. See **[why](SPEC.md#non-goals-hard)**.
 | --- | --- |
 | **[INSTALLING.md](INSTALLING.md)** | Requirements, first run, systemd service, nginx + Let's Encrypt, operating, troubleshooting |
 | **[SPEC.md](SPEC.md)** | Architecture, the safety model in full, features, routes, data model, every setting, non-goals |
+| **[API.md](API.md)** | The JSON API: API keys, endpoints, streaming events, error codes, limits, client examples |
 | **[CHANGELOG.md](CHANGELOG.md)** | What changed, per release |
 | **[.env.example](.env.example)** | Documented template for every setting |
 | **[LICENSE](LICENSE)** | MIT |

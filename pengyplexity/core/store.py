@@ -54,6 +54,7 @@ class Store:
         self._shares = moofile.Collection(str(self._path / "shares.bson"))
         self._artifacts = moofile.Collection(str(self._path / "artifacts.bson"))
         self._settings = moofile.Collection(str(self._path / "settings.bson"))
+        self._api_keys = moofile.Collection(str(self._path / "api_keys.bson"))
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -67,6 +68,7 @@ class Store:
             self._shares,
             self._artifacts,
             self._settings,
+            self._api_keys,
         ):
             col.close()
 
@@ -297,6 +299,35 @@ class Store:
 
     def artifact_count(self) -> int:
         return self._artifacts.count({})
+
+    # ------------------------------------------------------------------
+    # API keys (see core/apikeys.py — only a hash of each key is stored)
+    # ------------------------------------------------------------------
+
+    def create_api_key(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+        """Insert an API key record and return it (with ``_id``)."""
+        return self._api_keys.insert(doc)
+
+    def get_api_key(self, key_id: str) -> Optional[Dict[str, Any]]:
+        return self._api_keys.find_one({"_id": key_id})
+
+    def get_api_key_by_hash(self, key_hash: str) -> Optional[Dict[str, Any]]:
+        return self._api_keys.find_one({"key_hash": key_hash})
+
+    def list_api_keys_for_user(self, user_id: str) -> List[Dict[str, Any]]:
+        """All of a user's keys, newest first."""
+        docs = self._api_keys.find({"user_id": user_id}).to_list()
+        docs.sort(key=lambda d: d.get("created") or datetime.min, reverse=True)
+        return docs
+
+    def touch_api_key(self, key_id: str, when: datetime) -> bool:
+        return self._api_keys.update_one({"_id": key_id}, set={"last_used": when})
+
+    def delete_api_key(self, key_id: str) -> bool:
+        return self._api_keys.delete_one({"_id": key_id})
+
+    def delete_api_keys_for_user(self, user_id: str) -> int:
+        return self._api_keys.delete_many({"user_id": user_id})
 
     # ------------------------------------------------------------------
     # Settings (single document)

@@ -25,6 +25,7 @@ from flask import (
     Blueprint,
     current_app,
     flash,
+    make_response,
     redirect,
     render_template,
     request,
@@ -34,12 +35,26 @@ from flask import (
 )
 
 from .app import get_state
+from .core.apikeys import TooManyKeysError
 from .core.auth import (
     AuthService,
     InvalidCredentialsError,
     UserDisabledError,
 )
 from .sandbox import confine
+from .turns import (
+    DEFAULT_THREAD_TITLE,
+    AgentUnavailable,
+    ThreadGone,
+    apply_effective_settings,
+    begin_turn,
+    maybe_name_thread,
+    persist_answer,
+    prime_tool_context,
+    run_turn,
+    thread_history,
+    title_model,
+)
 
 _ARTIFACT_INLINE_KINDS = {"chart", "image"}
 
@@ -206,18 +221,18 @@ def ask(thread_id: str):
             current_user=user,
         )
 
-    # Store the user's question.
-    store.append_message(thread_id, "user", question)
-
-    # Name the thread from the first question, if it's still an untitled/blank one.
-    new_title = _maybe_name_thread(store, thread_id, question)
-
     wants_stream = (
         request.headers.get("Accept", "").startswith("text/event-stream")
         or request.args.get("stream") == "1"
     )
     if wants_stream:
-        return _ask_stream(thread_id, user, store, question, new_title=new_title)
+        return _ask_stream(thread_id, user, question)
+
+    # Store the user's question.
+    store.append_message(thread_id, "user", question)
+
+    # Name the thread from the first question, if it's still an untitled/blank one.
+    _maybe_name_thread(store, thread_id, question)
 
     answer, sources = _run_agent(thread_id, user, question)
 
@@ -250,291 +265,68 @@ def _run_agent(thread_id: str, user, question: str):
     agent.workspace = confine.workspace(
         user["username"], thread_id, base=state.config.workspace_root()
     )
-    # A brand-new thread has no workspace directory on disk yet (it's created
-    # lazily by write_file). Without this, the FIRST tool call in a thread —
-    # if it's run_bash/run_python/make_chart rather than write_file — hits a
-    # missing `cwd`/bind source and raises/exits with a raw host path (e.g.
-    # "/home/<realuser>/.pengyplexity/workspaces/...") in the tool result,
-    # leaking the real host username straight past the sandbox.
+    # Created up front so the first tool call can't hit a missing directory
+    # and leak the host path — see turns.begin_turn.
     agent.workspace.mkdir(parents=True, exist_ok=True)
-    _prime_tool_context(agent, thread_id, state)
-    _apply_effective_settings(state, agent, username=user["username"])
-    history = _thread_history(state_store(current_app), thread_id)
+    prime_tool_context(agent, thread_id, state)
+    apply_effective_settings(state, agent, username=user["username"])
+    history = thread_history(state_store(current_app), thread_id)
     result = agent.run(question, history=history)
     return result.answer, result.sources
 
 
-def _prime_tool_context(agent, thread_id: str, state) -> None:
-    """Point the shared tool executor's artifact context at *thread_id*.
-
-    ``make_chart``/``generate_image``/``edit_image`` (see ``core/toolexec.py``)
-    record the artifacts they create against ``context.thread_id`` /
-    ``context.message_index``. The assistant's answer for this turn hasn't
-    been appended yet, so its eventual index is simply the thread's current
-    message count (the user's question was already appended before the agent
-    runs). Also resets ``context.artifacts`` so a caller can inspect exactly
-    what this turn produced.
-    """
-    executor = getattr(agent, "tool_executor", None)
-    context = getattr(executor, "context", None) if executor is not None else None
-    if context is None:
-        return
-    thread = state.store.get_thread(thread_id)
-    context.thread_id = thread_id
-    context.message_index = len(thread.get("messages", [])) if thread else 0
-    context.owner = thread.get("owner", "") if thread else ""
-    context.artifacts = []
+# The turn machinery moved to turns.py so the JSON API shares it; these names
+# are kept for existing callers.
+_prime_tool_context = prime_tool_context
+_apply_effective_settings = apply_effective_settings
+_thread_history = thread_history
+_persist_answer = persist_answer
 
 
-def _apply_effective_settings(state, agent, username: str | None = None) -> None:
-    """Refresh the shared agent/runner/model/tool-context from the effective
-    settings (admin override in the store, else the env-loaded Config) —
-    see ``core/settings.py``. Mutates existing objects in place (the same
-    "shared singleton repointed per turn" pattern as ``agent.workspace``)
-    rather than reconstructing them, so a setting change takes effect on the
-    very next turn with no app restart.
-
-    *agent* is **this request's** agent (see ``AppState.new_agent``), not a
-    shared one. The runner/model/search it configures are shared, but every
-    value written there is a global admin setting, identical for every
-    request, so concurrent writes of the same value are harmless. The
-    per-turn values (system prompt, iteration cap, tool-output limits) land
-    on the request's own agent and tool context.
-
-    *username* is the logged-in app user (``current_user["username"]``), used
-    to fill ``{username}`` in the system message template — NOT the OS user
-    the process runs as, since Pengyplexity is multi-user.
-
-    A no-op for fakes used in tests (``FakeAgent``/``FakeModelClient`` etc.
-    simply lack the attributes this touches, all accessed via ``getattr``).
-    """
-    from .core.settings import effective_settings, render_system_message
-
-    if agent is None:
-        return
-    settings = effective_settings(state.store, state.config)
-
-    if hasattr(agent, "system_prompt"):
-        raw_message = settings["system_message"]
-        if raw_message:
-            try:
-                raw_message = render_system_message(raw_message, username=username)
-            except (KeyError, IndexError, ValueError):
-                # Bad admin-entered placeholder (e.g. {typo}) — fall back to
-                # the raw template rather than breaking every turn.
-                pass
-        agent.system_prompt = raw_message or None
-    if hasattr(agent, "max_iterations"):
-        agent.max_iterations = int(settings["max_agent_iterations"])
-
-    model = getattr(agent, "model", None)
-    if model is not None and hasattr(model, "configure"):
-        model.configure(
-            base_url=settings["model_base"],
-            api_key=settings["model_key"],
-            model=settings["model_name"],
-            temperature=float(settings["model_temperature"]),
-            timeout=float(settings["llm_timeout"]),
-        )
-
-    runner = state.runner
-    if runner is not None:
-        if hasattr(runner, "timeout"):
-            runner.timeout = int(settings["exec_timeout"])
-        if hasattr(runner, "mem_bytes"):
-            runner.mem_bytes = int(settings["exec_mem_mb"]) * 1024 * 1024
-        if hasattr(runner, "cpu_seconds"):
-            runner.cpu_seconds = int(settings["exec_cpu_seconds"])
-
-    memory = state.memory
-    if memory is not None:
-        # The right relevance cut point depends on the corpus and the
-        # embedding model, and the shipped defaults come from a small probe —
-        # so it is tunable live rather than needing a redeploy. See the
-        # calibration note in core/memory.py.
-        if hasattr(memory, "signal_floor"):
-            memory.signal_floor = float(settings["memory_signal_floor"])
-        if hasattr(memory, "signal_confident"):
-            memory.signal_confident = float(settings["memory_signal_confident"])
-
-    search = state.search
-    if search is not None:
-        if hasattr(search, "timeout"):
-            search.timeout = int(settings["tool_network_timeout"])
-        if hasattr(search, "user_agent"):
-            search.user_agent = settings["user_agent"]
-
-    executor = getattr(agent, "tool_executor", None)
-    context = getattr(executor, "context", None) if executor is not None else None
-    if context is not None:
-        context.tool_output_max_chars = int(settings["tool_output_max_chars"])
-        context.download_max_mb = float(settings["download_max_mb"])
-        context.tool_network_timeout = int(settings["tool_network_timeout"])
-        context.user_agent = settings["user_agent"]
-
-
-def _thread_history(store, thread_id: str) -> list:
-    """Build the prior message history for *thread_id* (excluding the just-added
-    user message — the agent adds it itself)."""
-    thread = store.get_thread(thread_id)
-    history = []
-    for msg in thread.get("messages", []):
-        if msg["role"] in ("user", "assistant"):
-            history.append({"role": msg["role"], "content": msg["content"]})
-    if history and history[-1]["role"] == "user":
-        history = history[:-1]
-    return history
-
-
-def _ask_stream(thread_id: str, user, store, question: str, new_title: str | None = None):
+def _ask_stream(thread_id: str, user, question: str):
     """Return an SSE response streaming the agent's answer for *thread_id*.
 
-    Persists the assistant message (with any sources) to the store once the
-    turn completes, so the re-render path and the stream agree on history.
-
-    *new_title*, when set, is the thread's freshly auto-generated title (see
-    ``_maybe_name_thread``) — the sidebar entry stays "New Thread" until the
-    client is told, since the stream never re-renders the sidebar itself.
+    The turn itself — storing the question, naming the thread, registering it
+    for Stop, persisting the (possibly partial) answer — is
+    :func:`pengyplexity.turns.run_turn`, shared with the JSON API.
     """
     from flask import stream_with_context
 
-    from .core.streaming import agent_stream, make_sse_response, sse_artifact, sse_error, sse_title
+    from .core.streaming import make_sse_response, sse_error
 
     state = get_state(current_app)
-    agent = state.new_agent()
-    if agent is None:
-        return make_sse_response(iter([sse_error("[Agent not configured]")]))
+    try:
+        turn = begin_turn(state, user, thread_id, question)
+    except AgentUnavailable as e:
+        return make_sse_response(iter([sse_error(f"[{e}]")]))
+    except ThreadGone:
+        return "Thread not found", 404
 
-    agent.workspace = confine.workspace(
-        user["username"], thread_id, base=state.config.workspace_root()
-    )
-    # A brand-new thread has no workspace directory on disk yet (it's created
-    # lazily by write_file). Without this, the FIRST tool call in a thread —
-    # if it's run_bash/run_python/make_chart rather than write_file — hits a
-    # missing `cwd`/bind source and raises/exits with a raw host path (e.g.
-    # "/home/<realuser>/.pengyplexity/workspaces/...") in the tool result,
-    # leaking the real host username straight past the sandbox.
-    agent.workspace.mkdir(parents=True, exist_ok=True)
-    _prime_tool_context(agent, thread_id, state)
-    _apply_effective_settings(state, agent, username=user["username"])
-    history = _thread_history(store, thread_id)
-
-    # Register this turn so POST /chat/<id>/stop can interrupt it. The token
-    # also reaches the sandbox runner (via the tool context) so Stop kills a
-    # running script instead of waiting out the execution timeout.
-    owner = user["username"]
-    cancel = state.cancels.start(owner, thread_id)
-    agent.cancel = cancel
-    executor = getattr(agent, "tool_executor", None)
-    tool_context = getattr(executor, "context", None) if executor is not None else None
-    if tool_context is not None:
-        tool_context.cancel = cancel
-
-    collected = []
+    def artifact_links(record):
+        inline = record.kind in _ARTIFACT_INLINE_KINDS
+        return {
+            "url": url_for(
+                "web.download_artifact",
+                thread_id=thread_id,
+                artifact_id=record._id,
+                inline=1 if inline else None,
+            ),
+            "download_url": url_for(
+                "web.download_artifact",
+                thread_id=thread_id,
+                artifact_id=record._id,
+            ),
+        }
 
     def generate():
-        persisted = False
+        events = run_turn(turn, artifact_links)
         try:
-            if new_title:
-                yield sse_title(new_title)
-            for event in agent_stream(agent, question, history=history):
-                # Record tokens so we can persist the final answer.
-                if event.startswith("event: token"):
-                    import json as _json
-                    data = event.split("\ndata: ", 1)[-1].rsplit("\n", 1)[0]
-                    try:
-                        collected.append(_json.loads(data)["content"])
-                    except Exception:
-                        pass
-                yield event
-            _persist_answer(store, thread_id, agent, collected, cancel)
-            persisted = True
-
-            # Any chart/image the model produced this turn (via make_chart /
-            # generate_image / edit_image) is already persisted as an
-            # artifact — surface it to the client now so it renders inline
-            # without needing a full page reload. Requires an active request
-            # context for url_for, hence stream_with_context wrapping below.
-            executor = getattr(agent, "tool_executor", None)
-            context = getattr(executor, "context", None) if executor is not None else None
-            for record in (context.artifacts if context else []):
-                if not record._id:
-                    continue
-                inline = record.kind in _ARTIFACT_INLINE_KINDS
-                yield sse_artifact({
-                    "artifact_id": record._id,
-                    "filename": record.filename,
-                    "kind": record.kind,
-                    "mime": record.mime,
-                    "url": url_for(
-                        "web.download_artifact",
-                        thread_id=thread_id,
-                        artifact_id=record._id,
-                        inline=1 if inline else None,
-                    ),
-                    "download_url": url_for(
-                        "web.download_artifact",
-                        thread_id=thread_id,
-                        artifact_id=record._id,
-                    ),
-                })
-        except Exception as e:  # noqa: BLE001
-            yield sse_error(str(e))
+            for event in events:
+                yield event.to_sse()
         finally:
-            # Reached on the normal path, on an error, and — the case that
-            # matters — on GeneratorExit when the browser hangs up because
-            # the user pressed Stop. Whatever the model had written by then
-            # is the user's; persisting it here is what keeps a stopped turn
-            # from vanishing out of the thread on the next page load.
-            if not persisted:
-                _persist_answer(
-                    store, thread_id, agent, collected, cancel, interrupted=True
-                )
-            state.cancels.finish(owner, thread_id, cancel)
+            events.close()
 
     return make_sse_response(stream_with_context(generate()))
-
-
-def _persist_answer(
-    store, thread_id: str, agent, collected, cancel, interrupted: bool = False
-) -> None:
-    """Store this turn's answer, marking it when the turn did not run to completion.
-
-    The one place a turn's assistant message is written, so a stopped turn is
-    saved exactly like a finished one — the text the model had already
-    produced belongs to the user and has to survive a reload.
-
-    *interrupted* means the generator is unwinding because the browser hung
-    up (``GeneratorExit``), rather than finishing normally.
-    """
-    answer = "".join(collected).strip()
-    stopped = cancel is not None and cancel.cancelled
-
-    if stopped:
-        note = "_[Stopped]_"
-    elif interrupted:
-        note = "_[Interrupted]_"
-    else:
-        note = ""
-
-    if note:
-        if not answer and interrupted and not stopped:
-            # Nothing was produced and nobody asked to stop: an early failure
-            # already surfaced as an `error` event, and a blank assistant
-            # bubble in the thread would only be confusing.
-            return
-        answer = f"{answer}\n\n{note}" if answer else note
-
-    try:
-        store.append_message(
-            thread_id, "assistant", answer,
-            sources=getattr(agent, "_last_sources", None) or [],
-        )
-    except Exception:  # noqa: BLE001
-        # Never let bookkeeping raise out of a generator that is already
-        # unwinding — it would replace the real reason in the log.
-        if not interrupted:
-            raise
 
 
 @web_bp.route("/chat/<thread_id>/stop", methods=["POST"])
@@ -661,12 +453,30 @@ def change_password():
             except InvalidCredentialsError as e:
                 error = str(e)
 
-    return render_template(
+    return _render_account(
+        user, error=error, success=success or request.args.get("success")
+    )
+
+
+def _render_account(user, **context):
+    """Render the Account page (appearance, password, API keys)."""
+    state = get_state(current_app)
+    keys = state.api_keys.list_for_user(user) if state.api_keys is not None else []
+    context.setdefault("api_key_success", request.args.get("api_key_success"))
+    context.setdefault("api_key_error", request.args.get("api_key_error"))
+    api_base = url_for("api.me", _external=True)[: -len("/me")]
+    resp = make_response(render_template(
         "account.html",
         current_user=user,
-        error=error,
-        success=success or request.args.get("success"),
-    )
+        api_keys=keys,
+        api_base=api_base,
+        **context,
+    ))
+    if context.get("new_api_key"):
+        # The plaintext key is on this page and nowhere else; keep it out of
+        # every cache.
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @web_bp.route("/account/theme", methods=["POST"])
@@ -688,6 +498,46 @@ def update_theme():
     accent = normalize_theme_accent(request.form.get("theme_accent"))
     state.store.update_user(user["_id"], theme_mode=mode, theme_accent=accent)
     return redirect(url_for("web.change_password", success="Appearance updated"))
+
+
+@web_bp.route("/account/api-keys", methods=["POST"])
+def create_api_key():
+    """Mint an API key and show it — once — on the Account page.
+
+    Rendered directly rather than redirected: the plaintext must never pass
+    through a URL or the (signed but readable) session cookie.
+    """
+    user = _require_login()
+    if user is None:
+        return redirect(url_for("web.login"))
+
+    state = get_state(current_app)
+    try:
+        key, record = state.api_keys.create(user, request.form.get("name", ""))
+    except TooManyKeysError as e:
+        return _render_account(user, api_key_error=str(e))
+    return _render_account(
+        user,
+        new_api_key=key,
+        api_key_success=f"API key '{record['name']}' created.",
+    )
+
+
+@web_bp.route("/account/api-keys/<key_id>/revoke", methods=["POST"])
+def revoke_api_key(key_id: str):
+    """Revoke one of the logged-in user's API keys."""
+    user = _require_login()
+    if user is None:
+        return redirect(url_for("web.login"))
+
+    state = get_state(current_app)
+    if state.api_keys.revoke(user, key_id):
+        return redirect(url_for(
+            "web.change_password", api_key_success="API key revoked.", _anchor="api-keys"
+        ))
+    return redirect(url_for(
+        "web.change_password", api_key_error="API key not found.", _anchor="api-keys"
+    ))
 
 
 @web_bp.route("/memories", methods=["GET", "POST"])
@@ -967,49 +817,22 @@ def state_store(app):
 
 
 def _default_thread_title() -> str:
-    return "New Thread"
+    return DEFAULT_THREAD_TITLE
 
 
 def _maybe_name_thread(store, thread_id: str, question: str) -> Optional[str]:
-    """Set a human-friendly title on a thread from its first question.
-
-    Only names a thread whose title is still the default "New Thread". Uses a
-    small LLM call via the app's model client; on any failure it falls back to
-    a truncated first line of the question so the title is always set.
-
-    Returns the new title, or ``None`` if the thread already had a real title
-    (nothing changed) — callers use this to tell the client about the rename.
-    """
-    thread = store.get_thread(thread_id)
-    if thread is None:
-        return None
-    title = (thread.get("title") or "").strip()
-    if title and title != _default_thread_title():
-        return None
-    model = _title_model()
-    new_title = model.generate_title(question) if model is not None else None
-    if not new_title:
-        first = question.splitlines()[0].strip() if question.strip() else "New Thread"
-        new_title = first[:60] or "New Thread"
-    store.update_thread_title(thread_id, new_title)
-    return new_title
+    """Name an untitled thread from its first question — see
+    :func:`pengyplexity.turns.maybe_name_thread`."""
+    return maybe_name_thread(get_state(current_app), thread_id, question)
 
 
 def _title_model():
-    """Return the app's model client (for title generation), or None.
-
-    Prefers the shared client on the app state. Building a whole request
-    agent just to reach its model would be wasteful, and a test that injects
-    a fake agent still needs its fake model honoured — hence the fallback.
-    """
+    """The app's model client for title generation, or None."""
     try:
         state = get_state(current_app)
     except RuntimeError:
         return None
-    injected = getattr(state, "agent", None)
-    if injected is not None:
-        return getattr(injected, "model", None)
-    return getattr(state, "model", None)
+    return title_model(state)
 
 
 def _thread_artifacts(store, thread_id: str) -> list:

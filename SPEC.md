@@ -4,7 +4,8 @@ The engineering detail behind Pengyplexity: how it is put together, and exactly
 what the safety boundary consists of.
 
 > For the overview, see the [README](README.md). To install and operate it, see
-> [INSTALLING.md](INSTALLING.md).
+> [INSTALLING.md](INSTALLING.md). To drive it from a program, see
+> [API.md](API.md).
 
 
 ---
@@ -15,10 +16,14 @@ what the safety boundary consists of.
 pengyplexity/
   app.py                # Flask app factory + AppState (service injection point)
   config.py             # env-derived Config (stdlib only, safe to import offline)
-  web.py                # web_bp: login, chat, thread history, ask (SSE)
+  web.py                # web_bp: login, chat, thread history, ask (SSE), account + API keys
+  api.py                # api_bp: the JSON API at /api/v1 (bearer API keys)
+  turns.py              # one chat turn's lifecycle, shared by web.py and api.py
   admin.py              # admin_bp: list/add/enable/disable/reset/delete users
   cli.py                # `create-admin` bootstrap (no self-sign-up)
   core/
+    apikeys.py          # personal API keys: mint, hash, verify, revoke
+    ratelimit.py        # per-user sliding-window limiter for API turns
     modelclient.py      # OpenAI-compatible chat client (reuses pengy.core.llm_client shape)
     agent.py            # one-turn tool loop: system prompt + SAFE_TOOLS -> answer + sources
     streaming.py        # SSE helpers (token / activity / done / error events)
@@ -49,6 +54,11 @@ pengyplexity/
    dispatched to the **bwrap runner** (see below).
 4. When the model stops emitting tool calls, the final answer + extracted
    **sources** (title + URL) are returned and streamed to the browser over **SSE**.
+
+The JSON API's `POST /api/v1/threads/<id>/messages` runs the same flow: both
+routes go through `turns.begin_turn` + `turns.run_turn`, so storing the
+question, naming the thread, applying live admin settings, Stop, and
+persisting a partial answer behave identically for a program and a browser.
 
 ### Services are injectable
 
@@ -198,7 +208,11 @@ confinement — and reinforced by the system prompt.
 - **Multi-user + login** — a login page. **No self sign-up.** Users are created and
   managed only by an admin (see *Bootstrap* and *Admin UI* below).
 - **Account** — any logged-in user can change their own password at
-  `/account/password` (distinct from the admin-only password reset).
+  `/account/password` (distinct from the admin-only password reset), and
+  create or revoke **API keys** for the JSON API.
+- **JSON API** (`/api/v1`, `api.py`) — everything a user does in the chat UI,
+  for programs such as a Discord bot: threads, asking (JSON or SSE), Stop,
+  artifacts, memories. See [API.md](API.md).
 - **Share** — pushes a message/thread to `tclip` (text/HTML) or `pengyshare`
   (images), storing the returned URL on the message.
 - **Images** — the model calls `generate_image` / `edit_image` (wrapping the
@@ -268,6 +282,8 @@ confinement — and reinforced by the system prompt.
 | `GET/POST /login`, `POST /logout` | Session auth (no sign-up) |
 | `GET/POST /account/password` | Self-service password change + theme picker (any logged-in user) |
 | `POST /account/theme` | Save theme mode + accent preference |
+| `POST /account/api-keys` | Create an API key (shown once) |
+| `POST /account/api-keys/<id>/revoke` | Revoke one of your API keys |
 | `GET /chat`, `/chat/new`, `/chat/<thread_id>` | Chat UI + thread history sidebar |
 | `POST /chat/<thread_id>/ask` | Ask a question (SSE-streamed answer) |
 | `GET /workspace` | Cross-thread artifact gallery |
@@ -281,8 +297,19 @@ confinement — and reinforced by the system prompt.
 | `GET/POST /admin/settings` | View/edit global settings — system message, model connection, agent/tool limits, sandbox execution limits (admin only) |
 | `POST /admin/settings/reset` | Clear all setting overrides back to `Config`/env defaults (admin only) |
 | `GET /healthz` | Liveness probe |
+| `/api/v1/...` | The JSON API — see [API.md](API.md) |
 
 Non-admins get a 403 on `/admin`; unauthenticated requests redirect to `/login`.
+
+---
+
+## HTTP API
+
+Programs — the planned Discord bot, scripts — drive the same agent through a
+JSON API at `/api/v1`, authenticated with per-user API keys created on the
+Account page (`core/apikeys.py`, `api.py`). The full reference —
+authentication, endpoints, streaming events, error codes, limits and client
+examples — is in **[API.md](API.md)**.
 
 ---
 
@@ -298,6 +325,8 @@ Store file: `~/.pengyplexity/pengyplexity.bson` (override with
   sources: [{title,url}], created }`.
 - **shares** — `{ _id, thread_id, message_index, kind (text|image|report), url, created }`.
 - **settings** — a single admin-configurable doc (e.g. the research query budget).
+- **api_keys** — `{ _id, user_id, name, display_prefix, key_hash (SHA-256), created,
+  last_used }`. The plaintext key is never stored; revoking deletes the row.
 
 A separate store file, `~/.pengyplexity/memories.bson` (override with the
 `memory_store_file` config), holds the **memories** collection: `{ _id, owner,
@@ -332,6 +361,8 @@ template of every setting below.
 | `PENGYPLEXITY_USER_AGENT` | `Mozilla/5.0 (Pengyplexity)` | User-Agent sent by `web_search`/`fetch_url`/`download_file` |
 | `PENGYPLEXITY_SECRET_KEY` | dev placeholder | Flask session key — **set in prod** |
 | `PENGYPLEXITY_DEBUG` | `0` | Flask debug mode |
+| `PENGYPLEXITY_API_RATE_LIMIT` | `30` | Questions per user per minute over the JSON API; `0` = no limit |
+| `PENGYPLEXITY_API_MAX_CONCURRENT_TURNS` | `4` | Threads per user answering at once over the JSON API; `0` = no limit |
 | `PENGYPLEXITY_EXEC_TIMEOUT` | `30` | Wall-clock timeout (s) per `run_*` |
 | `PENGYPLEXITY_EXEC_MEM_BYTES` | `512 MiB` | bwrap `--rlimit-as` |
 | `PENGYPLEXITY_EXEC_CPU_SECONDS` | `30` | bwrap `--rlimit-cpu` |
@@ -341,7 +372,8 @@ template of every setting below.
 | `PENGYPLEXITY_MEMORY_SIGNAL_CONFIDENT` | `0.50` | Similarity at or above which a memory is a strong match, not a lead |
 | `PENGYPLEXITY_MEMORY_SEMANTIC` | `1` | Enable the memory store's semantic search leg (moofile auto-embed). `0` = lexical (BM25) only, no embedding model load |
 
-All of the above (except storage paths, `SECRET_KEY`, and `DEBUG`) can also be
+All of the above (except storage paths, `SECRET_KEY`, `DEBUG`, and the two
+`API_` limits) can also be
 overridden live from `/admin/settings` without a restart — see *Admin
 settings* above; the env var is just the startup default.
 
@@ -368,7 +400,10 @@ bwrap**. Everything external sits behind an injectable interface and is faked in
 Coverage highlights: `test_confine.py` (path-escape rejection), `test_executors.py`
 (the exact bwrap argv contract), `test_toolpolicy.py` (allowlist exactness + no
 forbidden tool), `test_agent.py` (tool loop, iteration cap, source citation),
-`test_web.py` (login-required, ask, history, admin CRUD), and the feature suites for
+`test_web.py` (login-required, ask, history, admin CRUD), `test_api.py` (key
+auth, owner scoping, error shape, JSON + SSE turns, admission limits, artifact
+confinement), `test_apikeys.py` (hash-only storage, revocation, rate limiter),
+and the feature suites for
 search / deepresearch / artifacts / streaming / sharing / images / auth / store.
 
 Two tests are skipped when `reportlab` is unavailable in the interpreter (the

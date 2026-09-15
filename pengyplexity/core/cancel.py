@@ -40,6 +40,14 @@ class TurnCancelled(Exception):
     """Raised inside a turn once its :class:`CancelToken` has been cancelled."""
 
 
+class TurnInProgress(Exception):
+    """Raised by an exclusive :meth:`CancelRegistry.start` when the thread is busy."""
+
+
+class TooManyTurns(Exception):
+    """Raised by :meth:`CancelRegistry.start` when the owner is at their cap."""
+
+
 class CancelToken:
     """The cancellation flag for a single turn, plus its running processes."""
 
@@ -122,17 +130,38 @@ class CancelRegistry:
         self._tokens: Dict[Tuple[str, str], CancelToken] = {}
         self._lock = threading.Lock()
 
-    def start(self, owner: str, thread_id: str) -> CancelToken:
+    def start(
+        self,
+        owner: str,
+        thread_id: str,
+        exclusive: bool = False,
+        max_active: int = 0,
+    ) -> CancelToken:
         """Register a new turn and return its token.
 
-        A turn already running for the same thread is cancelled first: the
-        user has asked a new question in a thread that was still working, and
-        two concurrent turns would interleave into the same message list.
+        By default a turn already running for the same thread is cancelled
+        first: the user has asked a new question in a thread that was still
+        working, and two concurrent turns would interleave into the same
+        message list. That suits the browser, where the old turn's page is
+        gone. An API client may still be reading the old turn, so it passes
+        ``exclusive=True`` and gets :class:`TurnInProgress` instead.
+
+        ``max_active > 0`` caps how many threads *owner* may have running at
+        once (:class:`TooManyTurns`). Replacing a turn in the same thread does
+        not count as a new one. Both checks happen under the registry lock, so
+        two requests racing for the last slot cannot both win.
         """
         token = CancelToken()
+        key = (owner, thread_id)
         with self._lock:
-            previous = self._tokens.get((owner, thread_id))
-            self._tokens[(owner, thread_id)] = token
+            previous = self._tokens.get(key)
+            if previous is not None and exclusive:
+                raise TurnInProgress(thread_id)
+            if previous is None and max_active > 0:
+                running = sum(1 for (o, _t) in self._tokens if o == owner)
+                if running >= max_active:
+                    raise TooManyTurns(owner)
+            self._tokens[key] = token
         if previous is not None:
             previous.cancel()
         return token

@@ -99,6 +99,12 @@ class Config:
     secret_key: str = "insecure-dev-key-change-me"
     debug: bool = False
 
+    # --- JSON API (/api/v1) ----------------------------------------------
+    # Turns (questions) one user may start per minute over the API; 0 = no limit.
+    api_rate_limit: int = 30
+    # Threads one user may have answering at once over the API; 0 = no limit.
+    api_max_concurrent_turns: int = 4
+
     # --- Sandboxed execution ---------------------------------------------
     # Wall-clock timeout (seconds) for a single run_python / run_bash.
     exec_timeout: int = 30
@@ -153,6 +159,8 @@ class Config:
             "PENGYPLEXITY_DOWNLOAD_MAX_MB": self.download_max_mb,
             "PENGYPLEXITY_TOOL_NETWORK_TIMEOUT": self.tool_network_timeout,
             "PENGYPLEXITY_USER_AGENT": self.user_agent,
+            "PENGYPLEXITY_API_RATE_LIMIT": self.api_rate_limit,
+            "PENGYPLEXITY_API_MAX_CONCURRENT_TURNS": self.api_max_concurrent_turns,
             "PENGYPLEXITY_EXEC_TIMEOUT": self.exec_timeout,
             "PENGYPLEXITY_EXEC_MEM_BYTES": self.exec_mem_bytes,
             "PENGYPLEXITY_EXEC_CPU_SECONDS": self.exec_cpu_seconds,
@@ -185,6 +193,8 @@ def load_config() -> Config:
         user_agent=_env_str("PENGYPLEXITY_USER_AGENT", "Mozilla/5.0 (Pengyplexity)"),
         secret_key=_env_str("PENGYPLEXITY_SECRET_KEY", "insecure-dev-key-change-me"),
         debug=_env_str("PENGYPLEXITY_DEBUG", "0") in {"1", "true", "True"},
+        api_rate_limit=_env_int("PENGYPLEXITY_API_RATE_LIMIT", 30),
+        api_max_concurrent_turns=_env_int("PENGYPLEXITY_API_MAX_CONCURRENT_TURNS", 4),
         exec_timeout=_env_int("PENGYPLEXITY_EXEC_TIMEOUT", 30),
         exec_mem_bytes=_env_int("PENGYPLEXITY_EXEC_MEM_BYTES", 512 * 1024 * 1024),
         exec_cpu_seconds=_env_int("PENGYPLEXITY_EXEC_CPU_SECONDS", 30),
