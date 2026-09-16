@@ -36,6 +36,7 @@ STORE_NAMES = [
     "shares.bson",
     "api_keys.bson",
     "pengyplexity.bson",
+    "discord.bson",  # the Discord bot's conversation map
     "USERS.BSON",
     "Users.Bson",
 ]

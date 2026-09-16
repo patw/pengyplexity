@@ -196,6 +196,7 @@ also makes it the thing to back up.
 | Logs | `journalctl --user -u pengyplexity -f` |
 | Rebuild sandbox env | `uv run pengyplexity-admin build-sandbox --force` |
 | Add another admin | `uv run pengyplexity-admin create-admin <name>` |
+| Discord bot | Setup and its own systemd unit: [DISCORD.md](DISCORD.md) |
 
 - **Backups.** Stop the service first, or copy while it is idle — moofile is a
   single-file store, so a copy taken mid-write is not guaranteed consistent.

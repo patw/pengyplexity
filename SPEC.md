@@ -305,11 +305,23 @@ Non-admins get a 403 on `/admin`; unauthenticated requests redirect to `/login`.
 
 ## HTTP API
 
-Programs — the planned Discord bot, scripts — drive the same agent through a
+Programs — the Discord bot, scripts — drive the same agent through a
 JSON API at `/api/v1`, authenticated with per-user API keys created on the
 Account page (`core/apikeys.py`, `api.py`). The full reference —
 authentication, endpoints, streaming events, error codes, limits and client
 examples — is in **[API.md](API.md)**.
+
+### Discord bot
+
+`pengyplexity/discordbot/` is a separate process (`pengyplexity-discord`,
+installed with the `discord` extra). It is a pure API client acting as one
+dedicated user, and never touches the stores or sandbox directly. It maps
+each Discord conversation (a thread it started, a DM, or a reply chain) to a
+Pengyplexity thread in its own moofile store (`discord.bson`), streams answers
+into a live-edited message, re-uploads artifacts, and turns a ⏹️ reaction into
+`POST …/stop`. The question flow (`session.py`) is written against a small
+`Surface` interface, so it is tested against a live app with Discord faked.
+Setup, behaviour and settings are in **[DISCORD.md](DISCORD.md)**.
 
 ---
 
@@ -403,7 +415,8 @@ forbidden tool), `test_agent.py` (tool loop, iteration cap, source citation),
 `test_web.py` (login-required, ask, history, admin CRUD), `test_api.py` (key
 auth, owner scoping, error shape, JSON + SSE turns, admission limits, artifact
 confinement), `test_apikeys.py` (hash-only storage, revocation, rate limiter),
-and the feature suites for
+`test_discordbot_*.py` (the bot's client and question flow against a live app on
+127.0.0.1, message splitting, settings), and the feature suites for
 search / deepresearch / artifacts / streaming / sharing / images / auth / store.
 
 Two tests are skipped when `reportlab` is unavailable in the interpreter (the

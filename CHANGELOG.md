@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Discord bot** (`pengyplexity-discord`, new `discord` extra). It runs as its
+  own process and uses the JSON API as a dedicated Pengyplexity user, so setup
+  is: create the user, make an API key, and fill in three lines of `.env`.
+  @mention the bot and it opens a Discord thread for the question. The answer
+  streams in live, with sources, and any charts or images are attached.
+  Follow-ups in that thread keep the conversation going, and the mapping from
+  Discord to Pengyplexity threads survives restarts. The asker can react ⏹️ to
+  stop an answer. Options: per-user rate limit, channel allowlist, and DMs
+  (off by default). Setup guide in the new **DISCORD.md**.
 - **JSON API at `/api/v1`** — the groundwork for a Discord bot. A program can
   do everything a user does in the chat UI: create, list, rename and delete
   threads; ask questions with a plain JSON reply or an SSE stream; stop a

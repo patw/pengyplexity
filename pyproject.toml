@@ -34,9 +34,14 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+discord = [
+    "discord-py>=2.4",
+    "python-dotenv>=1.0",
+]
 
 [project.scripts]
 pengyplexity-admin = "pengyplexity.cli:main"
+pengyplexity-discord = "pengyplexity.discordbot.cli:main"
 
 [build-system]
 requires = ["hatchling"]

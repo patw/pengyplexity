@@ -151,6 +151,19 @@ def test_api_doc_covers_the_client_contract():
     assert "PENGYPLEXITY_API_RATE_LIMIT" in t
 
 
+def test_discord_doc_covers_setup():
+    """What an admin needs to get from nothing to a running bot."""
+    t = _text(ROOT / "DISCORD.md")
+    for var in ("DISCORD_BOT_TOKEN", "PENGYPLEXITY_API_URL", "PENGYPLEXITY_API_KEY"):
+        assert var in t, f"DISCORD.md no longer documents {var}"
+    assert "Message Content Intent" in t  # else follow-ups in threads are never seen
+    assert "uv sync --extra discord" in t
+    assert "pengyplexity-discord --check" in t
+    assert "non-admin" in t  # everyone on Discord shares the bot's account
+    assert "systemd" in t.lower()
+    assert "DISCORD.md" in _text(README) and "DISCORD.md" in _text(API)
+
+
 def test_api_doc_is_linked_both_ways():
     readme, spec, api = _text(README), _text(SPEC), _text(API)
     assert "API.md" in readme and "API.md" in spec

@@ -1,7 +1,7 @@
 # Pengyplexity — HTTP API
 
-A JSON API at `/api/v1` for programs: the planned Discord bot, scripts, anything
-that is not a browser. It gives a program the same agent the chat UI uses — same
+A JSON API at `/api/v1` for programs: the [Discord bot](DISCORD.md), scripts,
+anything that is not a browser. It gives a program the same agent the chat UI uses — same
 tools, same sandbox, same admin settings, same threads and memories — acting as
 one user.
 
