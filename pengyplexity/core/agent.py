@@ -77,7 +77,11 @@ or PDF was created without calling it; there is no other way to produce one.
 their ongoing work (preferences, recurring projects, context worth keeping \
 across conversations) — not one-off details only relevant to this turn. Use \
 `search_memory` to recall relevant memories before answering, especially at \
-the start of a new thread.
+the start of a new thread. When something you remembered has changed or was \
+wrong, use `edit_memory` on the id `search_memory` gives you rather than \
+saving a second, contradictory memory; use `delete_memory` when the user \
+asks you to forget something — it is permanent, so do not use it to tidy up \
+on your own initiative.
 
 ## Rules (NON-NEGOTIABLE)
 

@@ -29,6 +29,14 @@ host or on any machine that can reach the app.
   account. You can read them all in the web UI by logging in as that user.
   A channel is **one rolling conversation** (named `Discord #channel`), so the
   bot keeps what it learned there instead of starting fresh at every mention.
+- That conversation **starts over** once the room has been quiet for
+  `PENGYPLEXITY_DISCORD_IDLE_HOURS`, or after `PENGYPLEXITY_DISCORD_MAX_TURNS`
+  questions. A thread is replayed to the model in full on every turn, so a
+  channel bound to one thread for a month ends up resending tens of thousands
+  of tokens to be asked the time. Little is lost when it rolls over: the next
+  question still carries the room's recent messages, and anything worth
+  keeping should be a memory by then. A reply to one of the bot's answers
+  always continues *that* conversation, however old it is.
 - Each question carries the channel messages posted **since the bot last
   answered there**, up to `PENGYPLEXITY_DISCORD_HISTORY`. Only the new ones:
   everything older is already in the Pengyplexity thread, so the same text is
@@ -172,6 +180,8 @@ appear are the ones the model chose to write into the answer.
 | `PENGYPLEXITY_DISCORD_ALLOW_DMS` | `0` | Answer direct messages |
 | `PENGYPLEXITY_DISCORD_THREADS` | `0` | `0` answers in the channel, one rolling conversation per channel; `1` opens a Discord thread per question |
 | `PENGYPLEXITY_DISCORD_HISTORY` | `20` | Channel messages of context sent with a question; `0` = none |
+| `PENGYPLEXITY_DISCORD_IDLE_HOURS` | `3` | Start a fresh conversation once the room has been quiet this long; `0` = never on idle |
+| `PENGYPLEXITY_DISCORD_MAX_TURNS` | `20` | ...or after this many questions; `0` = no cap |
 | `PENGYPLEXITY_DISCORD_IMAGES` | `1` | Pass image attachments to the agent to fetch and look at |
 | `PENGYPLEXITY_DISCORD_USER_RATE_LIMIT` | `6` | Questions per Discord user per minute; `0` = no limit |
 | `PENGYPLEXITY_DISCORD_MAX_UPLOAD_MB` | `10` | Largest artifact to attach (Discord's limit depends on the server's boosts) |

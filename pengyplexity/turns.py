@@ -98,8 +98,10 @@ def begin_turn(
         # sandbox.
         agent.workspace.mkdir(parents=True, exist_ok=True)
         prime_tool_context(agent, thread_id, state)
-        apply_effective_settings(state, agent, username=owner)
-        history = thread_history(store, thread_id)
+        settings = apply_effective_settings(state, agent, username=owner)
+        history = thread_history(
+            store, thread_id, max_messages=int(settings["thread_history_messages"])
+        )
 
         # The token also reaches the sandbox runner (via the tool context) so
         # Stop kills a running script instead of waiting out the timeout.
@@ -287,9 +289,11 @@ def _compose_system_prompt(state, settings, username: str | None) -> str | None:
     return f"{base}\n\n{render(extra)}"
 
 
-def apply_effective_settings(state, agent, username: str | None = None) -> None:
+def apply_effective_settings(state, agent, username: str | None = None) -> Dict[str, Any]:
     """Refresh the shared agent/runner/model/tool-context from the effective
-    settings (admin override in the store, else the env-loaded Config) —
+    settings (admin override in the store, else the env-loaded Config), and
+    return those settings so a caller needing one of them (the history cap)
+    does not re-read the store —
     see ``core/settings.py``. Mutates existing objects in place (the same
     "shared singleton repointed per turn" pattern as ``agent.workspace``)
     rather than reconstructing them, so a setting change takes effect on the
@@ -311,9 +315,9 @@ def apply_effective_settings(state, agent, username: str | None = None) -> None:
     """
     from .core.settings import effective_settings
 
-    if agent is None:
-        return
     settings = effective_settings(state.store, state.config)
+    if agent is None:
+        return settings
 
     if hasattr(agent, "system_prompt"):
         agent.system_prompt = _compose_system_prompt(state, settings, username)
@@ -364,11 +368,20 @@ def apply_effective_settings(state, agent, username: str | None = None) -> None:
         context.download_max_mb = float(settings["download_max_mb"])
         context.tool_network_timeout = int(settings["tool_network_timeout"])
         context.user_agent = settings["user_agent"]
+    return settings
 
 
-def thread_history(store, thread_id: str) -> list:
+def thread_history(store, thread_id: str, max_messages: int = 0) -> list:
     """Build the prior message history for *thread_id* (excluding the just-added
-    user message — the agent adds it itself)."""
+    user message — the agent adds it itself).
+
+    *max_messages* keeps only the most recent N messages; 0 means all of them.
+    The whole history is re-sent to the model on every turn, so an unbounded
+    one makes each question in a long-lived thread cost more than the last —
+    a Discord channel bound to a single thread for weeks is the case that
+    bites. Trimmed history still starts on a user message, so the turns stay
+    paired the way a chat completion expects.
+    """
     thread = store.get_thread(thread_id)
     history = []
     for msg in thread.get("messages", []):
@@ -376,6 +389,12 @@ def thread_history(store, thread_id: str) -> list:
             history.append({"role": msg["role"], "content": msg["content"]})
     if history and history[-1]["role"] == "user":
         history = history[:-1]
+    if max_messages and len(history) > max_messages:
+        history = history[-max_messages:]
+        # Slicing can land on an assistant turn whose question is now gone,
+        # which reads as the model answering nothing.
+        if history and history[0]["role"] == "assistant":
+            history = history[1:]
     return history
 
 

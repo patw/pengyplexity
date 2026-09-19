@@ -35,9 +35,9 @@ inside the sandbox.
 - **Charts and images** — ask for a chart and it writes and runs matplotlib code;
   ask for a picture and it generates one. Both land inline in the thread and in a
   per-user workspace gallery you can download as a ZIP.
-- **A memory that persists** — the model can save and search private, per-user
-  memories across conversations, with hybrid lexical + semantic search, and every
-  edit is versioned rather than silently overwritten.
+- **A memory that persists** — the model can save, search, correct and delete
+  private, per-user memories across conversations, with hybrid lexical + semantic
+  search, and every edit is versioned rather than silently overwritten.
 - **Multi-user, admin-managed** — real logins with **no self-sign-up**,
   per-user themes (3 modes × 8 accents), and an admin settings panel that changes
   most behaviour live, with no restart.

@@ -177,3 +177,44 @@ class TestComposedSystemPrompt:
         store.create_user("web", "hash")
         store.set_setting("system_message", "You are Pengy.")
         assert self._apply(store, cfg, "web") == "You are Pengy."
+
+
+class TestThreadHistoryCap:
+    """The cap on how much of a thread is replayed to the model each turn.
+
+    A thread's whole history is re-sent on every turn, so an uncapped one
+    makes each question in a long-lived thread (a Discord channel's, which
+    can run for weeks) cost more in input tokens than the last.
+    """
+
+    def _thread(self, store, pairs):
+        doc = store.create_thread("alice", "Long one")
+        for i in range(pairs):
+            store.append_message(doc["_id"], "user", f"q{i}")
+            store.append_message(doc["_id"], "assistant", f"a{i}")
+        return doc["_id"]
+
+    def test_uncapped_returns_everything(self, store):
+        from pengyplexity.turns import thread_history
+        thread_id = self._thread(store, 10)
+        assert len(thread_history(store, thread_id, max_messages=0)) == 20
+
+    def test_keeps_the_most_recent_messages(self, store):
+        from pengyplexity.turns import thread_history
+        thread_id = self._thread(store, 10)
+        history = thread_history(store, thread_id, max_messages=6)
+        assert [m["content"] for m in history] == ["q7", "a7", "q8", "a8", "q9", "a9"]
+
+    def test_trimmed_history_still_starts_on_a_question(self, store):
+        """Slicing mid-exchange would open the history on an answer to a
+        question the model can no longer see."""
+        from pengyplexity.turns import thread_history
+        thread_id = self._thread(store, 10)
+        history = thread_history(store, thread_id, max_messages=5)
+        assert history[0]["role"] == "user"
+        assert [m["content"] for m in history] == ["q8", "a8", "q9", "a9"]
+
+    def test_the_cap_is_an_admin_setting(self, store, cfg):
+        assert defaults_from_config(cfg)["thread_history_messages"] == 30
+        save_settings_from_form(store, {"thread_history_messages": "8"})
+        assert effective_settings(store, cfg)["thread_history_messages"] == 8

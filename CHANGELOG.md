@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Conversations no longer grow without end.** A thread's whole history is
+  replayed to the model on every turn, so a Discord channel — bound to one
+  Pengyplexity thread forever — made each question dearer than the last: a
+  room chatting for a month was resending tens of thousands of input tokens
+  to be asked the time. Two changes, either of which would have helped, both
+  of which are cheap:
+  - The bot starts a **fresh conversation** for a channel or DM once the room
+    has been quiet for `PENGYPLEXITY_DISCORD_IDLE_HOURS` (3h), or after
+    `PENGYPLEXITY_DISCORD_MAX_TURNS` questions (20) — whichever comes first.
+    Rolling over costs little, because the next question still carries the
+    room's recent messages and durable facts should already be memories. A
+    reply to one of the bot's answers still continues *that* conversation,
+    however old it is.
+  - Server-side, only the most recent **`thread_history_messages`** (30) of a
+    thread are replayed, for every client rather than just the bot. Trimmed
+    history still starts on a question, so the turns stay paired. Admin →
+    Settings, or `PENGYPLEXITY_THREAD_HISTORY_MESSAGES`; `0` = no limit.
+- **The agent can now correct and forget memories**, not just write and search
+  them: `edit_memory` changes an existing memory by the id `search_memory`
+  returns (any of title/summary/body/tags/status, the rest left alone), and
+  `delete_memory` permanently removes one. Until now a fact that changed left
+  the model no option but to save a second, contradictory memory next to the
+  stale one, and "forget that" was something only a human could do on the
+  `/memories` page. Both are scoped to the calling user's own rows exactly as
+  `save_memory`/`search_memory` are — an id belonging to someone else reads as
+  "no such memory" — and an edit appends the prior value to the memory's
+  `update_history` with `assistant` as the editor, so the agent's corrections
+  are distinguishable from the user's own. Deletion is a real delete, the same
+  one the `/memories` page performs.
 - **Discord bot** (`pengyplexity-discord`, new `discord` extra). It runs as its
   own process and uses the JSON API as a dedicated Pengyplexity user, so setup
   is: create the user, make an API key, and fill in three lines of `.env`.

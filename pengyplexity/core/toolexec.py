@@ -40,7 +40,7 @@ from ..sandbox.executors import Runner
 from ..sandbox.toolpolicy import SAFE_TOOLS, build_safe_tool_schemas
 from .artifacts import ArtifactService
 from .images import ImageService
-from .memory import MemoryStore
+from .memory import VALID_STATUSES, MemoryStore
 from .search import SearchService
 from .vision import PendingImages, queue_image
 
@@ -61,7 +61,8 @@ _SKIP_DIRS = frozenset({".pengyplexity", "__pycache__", ".cache"})
 # Pengy's real tool inventory — always included in the schemas handed to the
 # model regardless of whether ``pengy`` happens to be importable.
 _APP_ONLY_TOOL_NAMES = frozenset(
-    {"make_chart", "generate_image", "edit_image", "create_report", "save_memory", "search_memory"}
+    {"make_chart", "generate_image", "edit_image", "create_report",
+     "save_memory", "search_memory", "edit_memory", "delete_memory"}
 )
 
 
@@ -74,8 +75,8 @@ class ToolContext:
     repointed per request in ``web.py``). Before each turn, the caller sets
     ``thread_id``/``message_index``/``owner`` so ``make_chart``/
     ``generate_image``/``edit_image`` record artifacts against the right
-    thread and message, and ``save_memory``/``search_memory`` read/write only
-    the calling user's own rows; after the turn, ``artifacts`` holds every
+    thread and message, and the ``*_memory`` tools read/write only the
+    calling user's own rows; after the turn, ``artifacts`` holds every
     :class:`~pengyplexity.core.artifacts.ArtifactRecord` produced so the
     caller (e.g. the SSE stream) can surface them immediately instead of
     waiting for a full page reload.
@@ -305,6 +306,32 @@ def _builtin_tool_schemas() -> List[dict]:
                       "misses when you want to confirm whether anything related exists at all.",
                       {"default": None})},
             ["query"],
+        ),
+        _schema(
+            "edit_memory",
+            "Correct an existing memory, identified by the id search_memory shows in brackets. "
+            "Pass only the fields you want to change; everything else is left as it is, and the "
+            "previous value is kept in the memory's history. Use this when a remembered fact has "
+            "changed or was recorded wrongly, rather than saving a second, contradictory memory.",
+            {**_param("memory_id", "string", "id of the memory to edit, as shown by search_memory"),
+             **_param("title", "string", "replacement title", {"default": None}),
+             **_param("summary", "string", "replacement 1-2 sentence summary (this is what search matches on)", {"default": None}),
+             **_param("body", "string", "replacement longer detail", {"default": None}),
+             **_param("tags", "array", "replacement tag list (replaces the existing tags entirely)", {"default": None}),
+             **_param("status", "string",
+                      "lifecycle status; only 'active' memories are returned by search_memory, so "
+                      "'superseded'/'deprecated' retire a memory while keeping it on record",
+                      {"default": None, "enum": list(VALID_STATUSES)})},
+            ["memory_id"],
+        ),
+        _schema(
+            "delete_memory",
+            "Permanently delete one of the user's memories, identified by the id search_memory "
+            "shows in brackets. This cannot be undone. Use it when the user asks you to forget "
+            "something; if a fact has merely changed, use edit_memory instead so the correction "
+            "keeps its history.",
+            {**_param("memory_id", "string", "id of the memory to delete, as shown by search_memory")},
+            ["memory_id"],
         ),
     ]
 
@@ -713,15 +740,42 @@ def _edit_image(
     return f"Edited image saved as '{record.filename}' ({record.size_bytes} bytes)."
 
 
+# The fields ``edit_memory`` may change — the subset of MemoryStore.update's
+# recognized fields that makes sense for the model to set.
+_EDITABLE_MEMORY_FIELDS = ("title", "summary", "body", "tags", "status")
+
+
+def _memory_unavailable(
+    memory_store: Optional[MemoryStore],
+    context: ToolContext,
+) -> Optional[str]:
+    """The two preconditions every memory tool shares: a store to talk to and
+    an owner to scope the rows to. Returns the message to hand back, or None."""
+    if memory_store is None:
+        return "Memory capability is not configured."
+    if not context.owner:
+        return "Memory capability requires a logged-in user context."
+    return None
+
+
+def _memory_not_found(memory_id: str) -> str:
+    """One message for both "no such memory" and "someone else's memory" —
+    which is deliberate: the model has no business learning that an id it
+    guessed belongs to another user."""
+    return (
+        f"No memory with id '{memory_id}' belongs to this user. Run search_memory "
+        "to get the current ids."
+    )
+
+
 def _save_memory(
     memory_store: Optional[MemoryStore],
     context: ToolContext,
     args: Dict,
 ) -> str:
-    if memory_store is None:
-        return "Memory capability is not configured."
-    if not context.owner:
-        return "Memory capability requires a logged-in user context."
+    unavailable = _memory_unavailable(memory_store, context)
+    if unavailable:
+        return unavailable
     title = str(args.get("title", "")).strip()
     summary = str(args.get("summary", "")).strip()
     if not title or not summary:
@@ -737,10 +791,9 @@ def _search_memory(
     context: ToolContext,
     args: Dict,
 ) -> str:
-    if memory_store is None:
-        return "Memory capability is not configured."
-    if not context.owner:
-        return "Memory capability requires a logged-in user context."
+    unavailable = _memory_unavailable(memory_store, context)
+    if unavailable:
+        return unavailable
     query = str(args.get("query", "")).strip()
     if not query:
         return "A 'query' is required."
@@ -784,6 +837,68 @@ def _search_memory(
     return out
 
 
+def _edit_memory(
+    memory_store: Optional[MemoryStore],
+    context: ToolContext,
+    args: Dict,
+) -> str:
+    unavailable = _memory_unavailable(memory_store, context)
+    if unavailable:
+        return unavailable
+    memory_id = str(args.get("memory_id", "")).strip()
+    if not memory_id:
+        return "A 'memory_id' is required — search_memory shows it in brackets before each title."
+
+    fields = {k: args[k] for k in _EDITABLE_MEMORY_FIELDS if args.get(k) is not None}
+    if not fields:
+        return (
+            "Nothing to change: pass at least one of "
+            f"{', '.join(_EDITABLE_MEMORY_FIELDS)} alongside 'memory_id'."
+        )
+    status = fields.get("status")
+    if status is not None and status not in VALID_STATUSES:
+        # MemoryStore.update would drop an unknown status silently, which
+        # would read to the model as a successful edit that did nothing.
+        return f"'{status}' is not a valid status; use one of: {', '.join(VALID_STATUSES)}."
+
+    # Read first so a wrong id is reported as such, and so the result can say
+    # which fields actually moved rather than which were merely passed.
+    before = memory_store.get(memory_id, owner=context.owner)
+    if before is None:
+        return _memory_not_found(memory_id)
+
+    doc = memory_store.update(memory_id, owner=context.owner, editor="assistant", **fields)
+    if doc is None:
+        return _memory_not_found(memory_id)
+
+    changed = [k for k in fields if doc.get(k) != before.get(k)]
+    if not changed:
+        return f"Memory '{doc['title']}' (id={memory_id}) already had those values — nothing changed."
+    return f"Updated {', '.join(changed)} on memory '{doc['title']}' (id={memory_id})."
+
+
+def _delete_memory(
+    memory_store: Optional[MemoryStore],
+    context: ToolContext,
+    args: Dict,
+) -> str:
+    unavailable = _memory_unavailable(memory_store, context)
+    if unavailable:
+        return unavailable
+    memory_id = str(args.get("memory_id", "")).strip()
+    if not memory_id:
+        return "A 'memory_id' is required — search_memory shows it in brackets before each title."
+
+    # Fetch before deleting so the confirmation can name what is now gone —
+    # after the delete there is nothing left to name.
+    doc = memory_store.get(memory_id, owner=context.owner)
+    if doc is None:
+        return _memory_not_found(memory_id)
+    if not memory_store.delete(memory_id, owner=context.owner):
+        return f"Could not delete memory '{doc['title']}' (id={memory_id})."
+    return f"Permanently deleted memory '{doc['title']}' (id={memory_id}). This cannot be undone."
+
+
 # ---------------------------------------------------------------------------
 # The executor factory
 # ---------------------------------------------------------------------------
@@ -812,7 +927,7 @@ def build_tool_executor(
         ``edit_image``. If omitted, those tools return an explanatory error.
     memory_store:
         Optional :class:`~pengyplexity.core.memory.MemoryStore` backing
-        ``save_memory``/``search_memory``. If omitted, those tools return an
+        the ``*_memory`` tools. If omitted, those tools return an
         explanatory error.
 
     Returns
@@ -881,6 +996,10 @@ def build_tool_executor(
                 result = _save_memory(memory_store, context, args)
             elif name == "search_memory":
                 result = _search_memory(memory_store, context, args)
+            elif name == "edit_memory":
+                result = _edit_memory(memory_store, context, args)
+            elif name == "delete_memory":
+                result = _delete_memory(memory_store, context, args)
             else:
                 result = f"Unknown tool: {name}"
         except confine.OutsideWorkspaceError as e:

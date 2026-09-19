@@ -108,7 +108,7 @@ def test_resolve_rejects_absolute_outside(ws):
 
 
 # ---------------------------------------------------------------------------
-# Memory tools (save_memory / search_memory)
+# Memory tools (save_memory / search_memory / edit_memory / delete_memory)
 # ---------------------------------------------------------------------------
 
 
@@ -179,6 +179,81 @@ class TestMemoryTools:
         # empty list as a failed lookup and guessing.
         assert "surfaced 0" in out
         assert "nothing saved on this topic" in out
+
+    def test_edit_memory_changes_fields_and_records_history(
+        self, ws, executor_with_memory, memory_store
+    ):
+        out = executor_with_memory(
+            "save_memory",
+            {"title": "Deadline", "summary": "Alice has a project deadline on Friday."},
+            ws,
+        )
+        memory_id = memory_store.list("alice")[0]["_id"]
+        assert memory_id in out
+
+        out = executor_with_memory(
+            "edit_memory",
+            {"memory_id": memory_id, "summary": "Alice's deadline moved to Monday.", "tags": ["work"]},
+            ws,
+        )
+        assert "Updated" in out and "summary" in out
+        doc = memory_store.get(memory_id, owner="alice")
+        assert doc["summary"] == "Alice's deadline moved to Monday."
+        assert doc["tags"] == ["work"]
+        # The old value is kept, so an edit is auditable rather than a silent
+        # overwrite — and the agent's edits are distinguishable from the user's.
+        assert doc["update_history"][-1]["editor"] == "assistant"
+        assert doc["update_history"][-1]["prior"]["summary"].endswith("on Friday.")
+
+    def test_edit_memory_requires_a_field_to_change(self, ws, executor_with_memory, memory_store):
+        executor_with_memory("save_memory", {"title": "T", "summary": "S"}, ws)
+        memory_id = memory_store.list("alice")[0]["_id"]
+        out = executor_with_memory("edit_memory", {"memory_id": memory_id}, ws)
+        assert "Nothing to change" in out
+
+    def test_edit_memory_rejects_an_unknown_status(self, ws, executor_with_memory, memory_store):
+        executor_with_memory("save_memory", {"title": "T", "summary": "S"}, ws)
+        memory_id = memory_store.list("alice")[0]["_id"]
+        out = executor_with_memory("edit_memory", {"memory_id": memory_id, "status": "forgotten"}, ws)
+        # MemoryStore.update drops an unknown status silently, which would read
+        # as a successful edit that did nothing.
+        assert "not a valid status" in out
+        assert memory_store.get(memory_id, owner="alice")["status"] == "active"
+
+    def test_edit_memory_unknown_id(self, ws, executor_with_memory):
+        out = executor_with_memory("edit_memory", {"memory_id": "nope", "title": "X"}, ws)
+        assert "No memory with id 'nope'" in out
+
+    def test_delete_memory_removes_the_row(self, ws, executor_with_memory, memory_store):
+        executor_with_memory("save_memory", {"title": "Deadline", "summary": "On Friday."}, ws)
+        memory_id = memory_store.list("alice")[0]["_id"]
+        out = executor_with_memory("delete_memory", {"memory_id": memory_id}, ws)
+        assert "Permanently deleted memory 'Deadline'" in out
+        assert memory_store.list("alice") == []
+
+    def test_delete_memory_requires_an_id(self, ws, executor_with_memory):
+        out = executor_with_memory("delete_memory", {}, ws)
+        assert "'memory_id' is required" in out
+
+    def test_edit_and_delete_are_scoped_per_owner(self, ws, memory_store):
+        runner = FakeRunner()
+        ex = build_tool_executor(runner, FakeSearchService(results=[]), memory_store=memory_store)
+        ex.context.owner = "alice"
+        ex("save_memory", {"title": "Alice secret", "summary": "Only Alice should see this."}, ws)
+        memory_id = memory_store.list("alice")[0]["_id"]
+
+        ex.context.owner = "bob"
+        assert "No memory with id" in ex("edit_memory", {"memory_id": memory_id, "title": "X"}, ws)
+        assert "No memory with id" in ex("delete_memory", {"memory_id": memory_id}, ws)
+        # Bob reached neither: Alice's memory is untouched.
+        doc = memory_store.get(memory_id, owner="alice")
+        assert doc["title"] == "Alice secret"
+
+    def test_memory_tools_require_a_configured_service(self, ws):
+        ex = build_tool_executor(FakeRunner(), FakeSearchService(results=[]))
+        ex.context.owner = "alice"
+        for name in ("edit_memory", "delete_memory"):
+            assert "not configured" in ex(name, {"memory_id": "x"}, ws)
 
 
 # ---------------------------------------------------------------------------

@@ -79,9 +79,9 @@ rather than merely relying on it.
 ### 1. Curated tool allowlist (`sandbox/toolpolicy.py`)
 
 `SAFE_TOOLS` is an explicit `frozenset` re-scoping the 16 tool **names** in
-`pengy.core.tools.TOOLS`, plus 3 of Pengyplexity's own capability wrappers
-(`make_chart`, `generate_image`, `edit_image`, `save_memory`, `search_memory` —
-see below), so 21 total:
+`pengy.core.tools.TOOLS`, plus 8 of Pengyplexity's own capability wrappers
+(`make_chart`, `generate_image`, `edit_image`, `create_report`, `save_memory`,
+`search_memory`, `edit_memory`, `delete_memory` — see below), so 24 total:
 
 | Category | Tools | How it's made safe |
 | --- | --- | --- |
@@ -90,8 +90,8 @@ see below), so 21 total:
 | Workspace-scoped writers | `write_file`, `replace_in_file`, `apply_changes` | Paths confined to the workspace |
 | Sandboxed runners | `run_python`, `run_bash` | Executed only inside bwrap |
 | Harness (no host access) | `todowrite`, `ask_user_question` | No filesystem / no host effect |
-| App capability wrappers | `make_chart`, `generate_image`, `edit_image` | Call `core/artifacts` / `core/images` (never the raw host-shelling skill); output confined to the workspace and registered as a servable artifact |
-| App capability wrappers | `save_memory`, `search_memory` | Call `core/memory.MemoryStore`, scoped to the calling user's own rows only; never a network call, never shared with other users |
+| App capability wrappers | `make_chart`, `generate_image`, `edit_image`, `create_report` | Call `core/artifacts` / `core/images` (never the raw host-shelling skill); output confined to the workspace and registered as a servable artifact |
+| App capability wrappers | `save_memory`, `search_memory`, `edit_memory`, `delete_memory` | Call `core/memory.MemoryStore`, scoped to the calling user's own rows only — the same rows the user can edit and delete by hand on `/memories`; never a network call, never shared with other users |
 
 Key points:
 
@@ -225,7 +225,8 @@ confinement — and reinforced by the system prompt.
   `download_artifact`), so a stale/hostile artifact record can't be used to read
   outside the sandbox.
 - **Memory** (`/memories`, `core/memory.py`) — a per-user, private notebook the
-  model can write to (`save_memory`) and search (`search_memory`) to recall
+  model can write to (`save_memory`), search (`search_memory`), correct
+  (`edit_memory`) and permanently forget from (`delete_memory`) to keep
   facts across conversations, modeled on `~/Personal/BotTalk`'s search/storage
   design: a moofile collection with BM25 lexical indexes plus a semantic vector
   index (moofile auto-embed), queried via lexical, semantic, or an RRF-fused
@@ -368,6 +369,7 @@ template of every setting below.
 | `PENGYPLEXITY_MAX_AGENT_ITERATIONS` | `12` | Hard tool-loop cap (runaway guard) |
 | `PENGYPLEXITY_RESEARCH_QUERY_BUDGET` | `6` | Max web queries per deep-research run |
 | `PENGYPLEXITY_TOOL_OUTPUT_MAX_CHARS` | `250000` | Snip (head+tail) tool output longer than this; `0` = no limit |
+| `PENGYPLEXITY_THREAD_HISTORY_MESSAGES` | `30` | Prior thread messages replayed to the model each turn; `0` = all |
 | `PENGYPLEXITY_DOWNLOAD_MAX_MB` | `100` | Max size for `download_file`; `0` = unlimited |
 | `PENGYPLEXITY_TOOL_NETWORK_TIMEOUT` | `15` | Timeout (s) for `web_search`/`fetch_url`/`download_file` |
 | `PENGYPLEXITY_USER_AGENT` | `Mozilla/5.0 (Pengyplexity)` | User-Agent sent by `web_search`/`fetch_url`/`download_file` |

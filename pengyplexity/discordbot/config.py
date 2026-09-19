@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
 from typing import FrozenSet
 
@@ -22,6 +23,10 @@ from ..config import _env_float, _env_int, _env_str, _home
 REQUIRED = ("DISCORD_BOT_TOKEN", "PENGYPLEXITY_API_URL", "PENGYPLEXITY_API_KEY")
 
 DEFAULT_USER_RATE_LIMIT = 6
+# A rolling conversation starts over once the room has been quiet this long.
+DEFAULT_IDLE_HOURS = 3.0
+# ...or after this many questions, for a channel that never goes quiet.
+DEFAULT_MAX_TURNS = 20
 # Discord's upload cap for a server without boosts.
 DEFAULT_MAX_UPLOAD_MB = 10.0
 # Channel messages of context handed to the model with a question.
@@ -50,6 +55,13 @@ class BotConfig:
     use_threads: bool = False
     # Preceding channel messages to hand the model as context; 0 = none.
     history_lines: int = DEFAULT_HISTORY_LINES
+    # A channel/DM conversation starts a fresh Pengyplexity thread once the
+    # room has been quiet this many hours, or after this many questions —
+    # whichever comes first. The whole thread is replayed to the model every
+    # turn, so without this each question in a long-lived room costs more
+    # than the last. 0 disables that half of the rule.
+    idle_hours: float = DEFAULT_IDLE_HOURS
+    max_turns: int = DEFAULT_MAX_TURNS
     # Pass image attachments to the agent (it fetches and views them itself).
     send_images: bool = True
     # Questions one Discord user may ask per minute; 0 = no limit. The server's
@@ -63,6 +75,10 @@ class BotConfig:
     @property
     def max_upload_bytes(self) -> int:
         return int(self.max_upload_mb * 1024 * 1024)
+
+    @property
+    def max_idle(self) -> timedelta:
+        return timedelta(hours=self.idle_hours)
 
 
 def _flag(name: str, default: bool) -> bool:
@@ -121,6 +137,8 @@ def load_bot_config() -> BotConfig:
         use_threads=_flag("PENGYPLEXITY_DISCORD_THREADS", False),
         # A negative count is meaningless and would reach discord.py as a limit.
         history_lines=max(0, _env_int("PENGYPLEXITY_DISCORD_HISTORY", DEFAULT_HISTORY_LINES)),
+        idle_hours=max(0.0, _env_float("PENGYPLEXITY_DISCORD_IDLE_HOURS", DEFAULT_IDLE_HOURS)),
+        max_turns=max(0, _env_int("PENGYPLEXITY_DISCORD_MAX_TURNS", DEFAULT_MAX_TURNS)),
         send_images=_flag("PENGYPLEXITY_DISCORD_IMAGES", True),
         user_rate_limit=_env_int("PENGYPLEXITY_DISCORD_USER_RATE_LIMIT", DEFAULT_USER_RATE_LIMIT),
         max_upload_mb=_env_float("PENGYPLEXITY_DISCORD_MAX_UPLOAD_MB", DEFAULT_MAX_UPLOAD_MB),

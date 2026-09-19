@@ -46,6 +46,8 @@ EXPECTED_SAFE = {
     "create_report",
     "save_memory",
     "search_memory",
+    "edit_memory",
+    "delete_memory",
 }
 
 

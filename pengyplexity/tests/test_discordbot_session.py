@@ -33,6 +33,7 @@ from pengyplexity.discordbot.conversations import (  # noqa: E402
     message_key,
     thread_key,
 )
+from datetime import datetime, timedelta, timezone  # noqa: E402
 from pengyplexity.discordbot.session import answer_question  # noqa: E402
 from pengyplexity.tests.test_api import ChartAgent, StreamingAgent  # noqa: E402
 
@@ -219,6 +220,54 @@ def test_channel_conversations_remember_what_was_already_seen(tmp_path):
         convo.close()
 
 
+def test_a_conversation_rolls_over_once_it_is_old_or_long(tmp_path):
+    convo = ConversationMap(tmp_path / "discord.bson")
+    hour, never = timedelta(hours=1), timedelta(0)
+    try:
+        key = channel_key(9)
+        convo.link(key, "t1")
+        convo.mark_seen(key, 100)
+
+        # Fresh and short: left alone.
+        assert convo.roll_over(key, hour, 20) is None
+        assert convo.thread_for(key) == "t1"
+
+        # Long: the turn cap catches a channel that never goes quiet.
+        for _ in range(3):
+            convo.record_turn(key)
+        assert convo.roll_over(key, hour, 20) is None
+        assert "3 turns" in convo.roll_over(key, hour, 3)
+        # Everything goes together: the next question opens a new thread AND
+        # re-sends the room's recent messages to it.
+        assert convo.thread_for(key) is None
+        assert convo.last_seen(key) is None
+
+        # Idle: the room moved on hours ago.
+        convo.link(key, "t2")
+        convo.record_turn(key)
+        assert convo.roll_over(key, never, 0) is None   # both halves disabled
+        five_hours_ago = datetime.now(timezone.utc) - timedelta(hours=5)
+        convo._col.update_one({"key": key}, set={"updated": five_hours_ago})
+        assert convo.roll_over(key, hour, 0).startswith("idle for 5.0h")
+        assert convo.thread_for(key) is None
+    finally:
+        convo.close()
+
+
+def test_replying_to_an_answer_never_rolls_over(tmp_path):
+    """A 'msg:' key is someone replying to one specific answer — an explicit
+    request to continue that conversation, however old it is."""
+    convo = ConversationMap(tmp_path / "discord.bson")
+    try:
+        convo.link(message_key(11), "t1")
+        for _ in range(50):
+            convo.record_turn(message_key(11))
+        assert convo.roll_over(message_key(11), timedelta(0.0), 1) is None
+        assert convo.thread_for(message_key(11)) == "t1"
+    finally:
+        convo.close()
+
+
 # ---------------------------------------------------------------------------
 # Against a live app
 # ---------------------------------------------------------------------------
@@ -268,6 +317,24 @@ def test_first_question_creates_a_thread_and_follow_ups_reuse_it(server, key, co
     thread = state.store.get_thread(thread_id)
     assert [m["role"] for m in thread["messages"]] == ["user", "assistant", "user", "assistant"]
     assert thread["owner"] == "discordbot"
+
+
+def test_a_rolled_over_channel_starts_a_new_thread(server, key, conversations, state):
+    run(_ask(server, key, conversations, channel_key(77), "Are cats mammals?", _surface()))
+    first = conversations.thread_for(channel_key(77))
+    # Asking is what counts a turn, so the cap measures the conversation's
+    # real cost rather than how long the bot has been running.
+    assert conversations.record_turn(channel_key(77)) == 2
+
+    assert conversations.roll_over(channel_key(77), timedelta(hours=3), 2) is not None
+    run(_ask(server, key, conversations, channel_key(77), "And dogs?", _surface()))
+    second = conversations.thread_for(channel_key(77))
+
+    assert second and second != first
+    # The old thread keeps its history; the new one starts clean, which is the
+    # whole point — the next question pays for one exchange, not the room's month.
+    assert len(state.store.get_thread(first)["messages"]) == 2
+    assert len(state.store.get_thread(second)["messages"]) == 2
 
 
 def test_a_channel_thread_is_named_rather_than_titled_from_the_question(

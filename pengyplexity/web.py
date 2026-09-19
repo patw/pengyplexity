@@ -269,8 +269,10 @@ def _run_agent(thread_id: str, user, question: str):
     # and leak the host path — see turns.begin_turn.
     agent.workspace.mkdir(parents=True, exist_ok=True)
     prime_tool_context(agent, thread_id, state)
-    apply_effective_settings(state, agent, username=user["username"])
-    history = thread_history(state_store(current_app), thread_id)
+    settings = apply_effective_settings(state, agent, username=user["username"])
+    history = thread_history(
+        state_store(current_app), thread_id, max_messages=int(settings["thread_history_messages"])
+    )
     result = agent.run(question, history=history)
     return result.answer, result.sources
 

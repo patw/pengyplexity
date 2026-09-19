@@ -88,6 +88,13 @@ class Config:
     research_query_budget: int = 6
     # Tool output longer than this is snipped (head+tail); 0 = no limit.
     tool_output_max_chars: int = 250_000
+    # How many of a thread's prior messages are replayed to the model each
+    # turn; 0 = all of them. A thread is a rolling conversation and the whole
+    # history is re-sent on every turn, so an old, busy thread (a Discord
+    # channel's, say) otherwise costs more in input tokens with every
+    # question asked in it. The most recent N is what a follow-up actually
+    # needs — anything worth keeping past that belongs in a memory.
+    thread_history_messages: int = 30
     # Default max download size (MB) for download_file; 0 = unlimited.
     download_max_mb: float = 100.0
     # Timeout (seconds) for web_search / fetch_url / download_file.
@@ -156,6 +163,7 @@ class Config:
             "PENGYPLEXITY_MAX_AGENT_ITERATIONS": self.max_agent_iterations,
             "PENGYPLEXITY_RESEARCH_QUERY_BUDGET": self.research_query_budget,
             "PENGYPLEXITY_TOOL_OUTPUT_MAX_CHARS": self.tool_output_max_chars,
+            "PENGYPLEXITY_THREAD_HISTORY_MESSAGES": self.thread_history_messages,
             "PENGYPLEXITY_DOWNLOAD_MAX_MB": self.download_max_mb,
             "PENGYPLEXITY_TOOL_NETWORK_TIMEOUT": self.tool_network_timeout,
             "PENGYPLEXITY_USER_AGENT": self.user_agent,
@@ -188,6 +196,7 @@ def load_config() -> Config:
         max_agent_iterations=_env_int("PENGYPLEXITY_MAX_AGENT_ITERATIONS", 12),
         research_query_budget=_env_int("PENGYPLEXITY_RESEARCH_QUERY_BUDGET", 6),
         tool_output_max_chars=_env_int("PENGYPLEXITY_TOOL_OUTPUT_MAX_CHARS", 250_000),
+        thread_history_messages=_env_int("PENGYPLEXITY_THREAD_HISTORY_MESSAGES", 30),
         download_max_mb=_env_float("PENGYPLEXITY_DOWNLOAD_MAX_MB", 100.0),
         tool_network_timeout=_env_int("PENGYPLEXITY_TOOL_NETWORK_TIMEOUT", 15),
         user_agent=_env_str("PENGYPLEXITY_USER_AGENT", "Mozilla/5.0 (Pengyplexity)"),

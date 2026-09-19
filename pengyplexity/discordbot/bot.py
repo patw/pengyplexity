@@ -274,6 +274,14 @@ class PengyplexityBot(discord.Client):
 
         if route.new:
             route = await self._open_conversation(message, question)
+        # Before the context is built, so a rolled-over conversation re-sends
+        # the room's recent messages to the fresh thread instead of the one or
+        # two lines since the last watermark.
+        reason = self.conversations.roll_over(
+            route.key, self.config.max_idle, self.config.max_turns
+        )
+        if reason:
+            log.info("Starting a fresh conversation for %s (%s).", route.key, reason)
         history, speakers = await self._channel_context(message, route.key)
         asker = _speaker(message.author)
         question = build_question(

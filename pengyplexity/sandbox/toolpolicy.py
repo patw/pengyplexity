@@ -73,13 +73,16 @@ SAFE_TOOLS = frozenset(
         "edit_image",
         "create_report",
         # -- private, per-user memory (never the shared bottalk board) -----
-        # save_memory/search_memory read/write ONLY the calling user's own
-        # rows in core/memory.MemoryStore. This is a different capability
-        # from the forbidden raw "bottalk" skill, which posts to a shared,
-        # cross-bot, network-visible message bus — nothing here ever leaves
-        # the app's local database or crosses between users.
+        # These read/write ONLY the calling user's own rows in
+        # core/memory.MemoryStore — the same rows that user can already edit
+        # and delete by hand on the /memories page. This is a different
+        # capability from the forbidden raw "bottalk" skill, which posts to a
+        # shared, cross-bot, network-visible message bus — nothing here ever
+        # leaves the app's local database or crosses between users.
         "save_memory",
         "search_memory",
+        "edit_memory",
+        "delete_memory",
     }
 )
 
@@ -131,6 +134,8 @@ RATIONALES: dict[str, str] = {
     "create_report": "Calls the injectable ArtifactService (core/artifacts.markdown_to_html/html_to_pdf); output is written only inside the workspace and registered as an artifact — no host access or network.",
     "save_memory": "Writes ONLY to the calling user's own rows in the private MemoryStore; never a network call, never shared with other users.",
     "search_memory": "Reads ONLY the calling user's own rows in the private MemoryStore; never a network call, never shared with other users.",
+    "edit_memory": "Edits ONLY the calling user's own rows in the private MemoryStore; the prior value of every changed field is kept in the memory's update_history, so an edit is auditable rather than a silent overwrite.",
+    "delete_memory": "Deletes ONLY the calling user's own rows in the private MemoryStore — the same delete the user can already perform on the /memories page; never a network call, never touches another user's rows.",
 }
 
 # ---------------------------------------------------------------------------
@@ -217,6 +222,8 @@ TOOL_ACTIVITY_LABELS: dict[str, str] = {
     "create_report": "Writing a report…",
     "save_memory": "Remembering that…",
     "search_memory": "Recalling memories…",
+    "edit_memory": "Updating a memory…",
+    "delete_memory": "Forgetting that…",
 }
 
 

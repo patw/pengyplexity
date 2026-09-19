@@ -115,6 +115,14 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group">
+                        <label for="set-thread-history">Thread history (messages)</label>
+                        <input type="text" id="set-thread-history" name="thread_history_messages" class="form-control"
+                               placeholder="{{ settings.thread_history_messages }}" value="{{ overrides.get('thread_history_messages', '') }}">
+                        <p class="field-hint">How much of a thread is replayed to the model each turn. The whole history is re-sent every time, so a long thread costs more with every question. 0 = no limit.</p>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
                         <label for="set-download-max">Max download (MB)</label>
                         <input type="text" id="set-download-max" name="download_max_mb" class="form-control"
                                placeholder="{{ settings.download_max_mb }}" value="{{ overrides.get('download_max_mb', '') }}">

@@ -18,16 +18,29 @@ message whose text was handed to the model. The bot injects only the channel
 messages newer than it, so a rolling conversation never sees the same message
 twice (the Pengyplexity thread already holds everything before it).
 
+A rolling conversation also *ends* eventually, via :meth:`ConversationMap.
+roll_over`. A thread's whole history is replayed to the model on every turn,
+so a channel bound to one thread forever makes each question dearer than the
+last — a room that has been chatting for a month can be resending tens of
+thousands of tokens to be asked the time. Rolling over is cheap here because
+nothing durable is lost: the bot hands the model the room's recent messages
+as context anyway, and anything worth keeping should already be a memory.
+
 Stored with moofile like the rest of Pengyplexity, one small document per key.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 import moofile
+
+# Conversations that roll over when they get old or long. A ``msg:`` key is
+# someone replying to one specific answer — that is an explicit request to
+# continue *that* conversation, so it is never rolled over out from under them.
+ROLLING_PREFIXES = ("channel:", "thread:", "dm:")
 
 
 def channel_key(channel_id: int) -> str:
@@ -65,7 +78,54 @@ class ConversationMap:
             self._col.insert({"key": key, **fields, "created": now, "updated": now})
 
     def link(self, key: str, thread_id: str) -> None:
-        self._set(key, {"thread_id": thread_id})
+        self._set(key, {"thread_id": thread_id, "turns": 0})
+
+    def record_turn(self, key: str) -> int:
+        """Count a question asked in this conversation; returns the new total."""
+        doc = self._col.find_one({"key": key})
+        turns = int((doc or {}).get("turns") or 0) + 1
+        self._set(key, {"turns": turns})
+        return turns
+
+    def stale(self, key: str, max_idle: timedelta, max_turns: int) -> Optional[str]:
+        """Why this conversation should start over, or None to carry on.
+
+        Idle first: a room that went quiet for hours has moved on, and the
+        next question is usually a new subject. The turn cap is the backstop
+        for a channel that never goes quiet.
+        """
+        if not key.startswith(ROLLING_PREFIXES):
+            return None
+        doc = self._col.find_one({"key": key})
+        if not doc or not doc.get("thread_id"):
+            return None
+        updated = doc.get("updated")
+        if max_idle and isinstance(updated, datetime):
+            # moofile can hand back a naive datetime; treat it as the UTC it
+            # was written as rather than crashing on the comparison.
+            if updated.tzinfo is None:
+                updated = updated.replace(tzinfo=timezone.utc)
+            idle = datetime.now(timezone.utc) - updated
+            if idle >= max_idle:
+                return f"idle for {idle.total_seconds() / 3600:.1f}h"
+        turns = int(doc.get("turns") or 0)
+        if max_turns and turns >= max_turns:
+            return f"{turns} turns"
+        return None
+
+    def roll_over(self, key: str, max_idle: timedelta, max_turns: int) -> Optional[str]:
+        """Start this conversation over if it is stale; returns the reason it
+        was rolled over, or None if it was left alone.
+
+        Forgetting the key drops the thread link, the turn count *and* the
+        ``last_seen`` watermark together — so the next question opens a new
+        thread and re-sends the room's recent messages to it, which a thread
+        with no history of its own needs.
+        """
+        reason = self.stale(key, max_idle, max_turns)
+        if reason:
+            self.forget(key)
+        return reason
 
     def last_seen(self, key: str) -> Optional[int]:
         """The last Discord message id already shown to the model, if any."""

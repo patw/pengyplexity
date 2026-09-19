@@ -107,6 +107,10 @@ async def _thread_for(
 
 async def _ask(api, conversations, key, question, surface, max_upload_bytes, title=None) -> Outcome:
     thread_id = await _thread_for(api, conversations, key, title)
+    # Counted before the answer, not after: a turn the model failed halfway
+    # through still left its question in the thread, and still has to be
+    # replayed on the next one.
+    conversations.record_turn(key)
 
     label, partial = penguin_activity(), ""
     streamed_artifacts: List[Dict[str, Any]] = []
