@@ -24,6 +24,8 @@ REQUIRED = ("DISCORD_BOT_TOKEN", "PENGYPLEXITY_API_URL", "PENGYPLEXITY_API_KEY")
 DEFAULT_USER_RATE_LIMIT = 6
 # Discord's upload cap for a server without boosts.
 DEFAULT_MAX_UPLOAD_MB = 10.0
+# Channel messages of context handed to the model with a question.
+DEFAULT_HISTORY_LINES = 20
 
 
 class ConfigError(ValueError):
@@ -43,8 +45,13 @@ class BotConfig:
     # Channels the bot answers in (threads count as their parent); empty = all.
     channel_ids: FrozenSet[int] = frozenset()
     allow_dms: bool = False
-    # Answer a new question in a Discord thread started from it (else reply inline).
-    use_threads: bool = True
+    # Answer a new question in a Discord thread started from it (else reply inline
+    # and keep one rolling conversation per channel).
+    use_threads: bool = False
+    # Preceding channel messages to hand the model as context; 0 = none.
+    history_lines: int = DEFAULT_HISTORY_LINES
+    # Pass image attachments to the agent (it fetches and views them itself).
+    send_images: bool = True
     # Questions one Discord user may ask per minute; 0 = no limit. The server's
     # own API limit is shared by everyone talking to the bot, so this keeps one
     # person from spending all of it.
@@ -111,7 +118,10 @@ def load_bot_config() -> BotConfig:
         state_path=state_path.expanduser(),
         channel_ids=_channel_ids(os.environ.get("PENGYPLEXITY_DISCORD_CHANNELS", "")),
         allow_dms=_flag("PENGYPLEXITY_DISCORD_ALLOW_DMS", False),
-        use_threads=_flag("PENGYPLEXITY_DISCORD_THREADS", True),
+        use_threads=_flag("PENGYPLEXITY_DISCORD_THREADS", False),
+        # A negative count is meaningless and would reach discord.py as a limit.
+        history_lines=max(0, _env_int("PENGYPLEXITY_DISCORD_HISTORY", DEFAULT_HISTORY_LINES)),
+        send_images=_flag("PENGYPLEXITY_DISCORD_IMAGES", True),
         user_rate_limit=_env_int("PENGYPLEXITY_DISCORD_USER_RATE_LIMIT", DEFAULT_USER_RATE_LIMIT),
         max_upload_mb=_env_float("PENGYPLEXITY_DISCORD_MAX_UPLOAD_MB", DEFAULT_MAX_UPLOAD_MB),
     )

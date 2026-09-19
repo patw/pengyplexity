@@ -15,7 +15,13 @@ from typing import Any, Dict, List, Optional, Protocol, Tuple
 
 from .apiclient import ApiError, ArtifactTooLarge, PengyplexityClient
 from .conversations import ConversationMap, message_key
-from .render import describe_api_error, megabytes, progress_text, render_answer
+from .render import (
+    describe_api_error,
+    megabytes,
+    penguin_activity,
+    progress_text,
+    render_answer,
+)
 
 log = logging.getLogger("pengyplexity.discord")
 
@@ -31,9 +37,6 @@ class Upload:
 
 class Surface(Protocol):
     """Where a question's progress and answer are shown."""
-
-    async def started(self, thread_id: str) -> None:
-        """The turn is about to run in *thread_id* (so it can be stopped)."""
 
     async def progress(self, text: str) -> None:
         """Replace the live progress text. Called often; throttling is the surface's job."""
@@ -61,13 +64,20 @@ async def answer_question(
     surface: Surface,
     *,
     max_upload_bytes: int,
+    title: Optional[str] = None,
 ) -> Outcome:
     """Ask *question* in the thread mapped to *key* (creating one if needed)
     and deliver the answer. API refusals are delivered as a readable message
-    rather than raised."""
+    rather than raised.
+
+    *title* names a newly created thread. A caller passes it when the question
+    text would make a poor title — a channel conversation prefixes the room's
+    recent messages, and the server names an unnamed thread from the start of
+    its first question.
+    """
     try:
         try:
-            return await _ask(api, conversations, key, question, surface, max_upload_bytes)
+            return await _ask(api, conversations, key, question, surface, max_upload_bytes, title)
         except ApiError as e:
             if e.code != "thread_not_found":
                 raise
@@ -75,26 +85,30 @@ async def answer_question(
             # over rather than failing every message from now on.
             log.info("Thread for %s is gone; starting a new one.", key)
             conversations.forget(key)
-            return await _ask(api, conversations, key, question, surface, max_upload_bytes)
+            return await _ask(api, conversations, key, question, surface, max_upload_bytes, title)
     except ApiError as e:
         log.warning("API refused a question for %s: %s", key, e)
         ids = await surface.deliver(describe_api_error(e), [])
         return Outcome(None, ids, error=e.code)
 
 
-async def _thread_for(api: PengyplexityClient, conversations: ConversationMap, key: str) -> str:
+async def _thread_for(
+    api: PengyplexityClient,
+    conversations: ConversationMap,
+    key: str,
+    title: Optional[str] = None,
+) -> str:
     thread_id = conversations.thread_for(key)
     if thread_id is None:
-        thread_id = (await api.create_thread())["id"]
+        thread_id = (await api.create_thread(title))["id"]
         conversations.link(key, thread_id)
     return thread_id
 
 
-async def _ask(api, conversations, key, question, surface, max_upload_bytes) -> Outcome:
-    thread_id = await _thread_for(api, conversations, key)
-    await surface.started(thread_id)
+async def _ask(api, conversations, key, question, surface, max_upload_bytes, title=None) -> Outcome:
+    thread_id = await _thread_for(api, conversations, key, title)
 
-    label, partial = "Thinking…", ""
+    label, partial = penguin_activity(), ""
     streamed_artifacts: List[Dict[str, Any]] = []
     final: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
@@ -103,7 +117,9 @@ async def _ask(api, conversations, key, question, surface, max_upload_bytes) -> 
         if event == "title":
             await surface.rename(str(data.get("title") or ""))
         elif event == "activity":
-            label = str(data.get("label") or label)
+            # The server's precise label ("Searching the web…") is dropped on
+            # purpose; see render.penguin_activity.
+            label = penguin_activity(exclude=label)
             await surface.progress(progress_text(label, partial))
         elif event == "token":
             partial += str(data.get("content") or "")

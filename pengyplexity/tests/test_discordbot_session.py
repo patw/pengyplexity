@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +29,7 @@ from pengyplexity.discordbot.apiclient import (  # noqa: E402
 )
 from pengyplexity.discordbot.conversations import (  # noqa: E402
     ConversationMap,
+    channel_key,
     message_key,
     thread_key,
 )
@@ -90,14 +92,10 @@ def conversations(tmp_path):
 
 class FakeSurface:
     def __init__(self):
-        self.thread_ids = []
         self.progress_updates = []
         self.titles = []
         self.delivered = []
         self._next_id = 1000
-
-    async def started(self, thread_id):
-        self.thread_ids.append(thread_id)
 
     async def progress(self, text):
         self.progress_updates.append(text)
@@ -118,10 +116,11 @@ def run(coro):
     return asyncio.run(coro)
 
 
-async def _ask(server, key, conversations, convo_key, question, surface, max_bytes=BIG):
+async def _ask(server, key, conversations, convo_key, question, surface, max_bytes=BIG, title=None):
     async with PengyplexityClient(server, key) as api:
         return await answer_question(
-            api, conversations, convo_key, question, surface, max_upload_bytes=max_bytes
+            api, conversations, convo_key, question, surface,
+            max_upload_bytes=max_bytes, title=title,
         )
 
 
@@ -176,6 +175,50 @@ def test_conversation_map_persists_across_restarts(tmp_path):
         convo.close()
 
 
+def test_only_image_attachments_are_offered_to_the_agent():
+    pytest.importorskip("discord")
+    from pengyplexity.discordbot.bot import _image_attachments
+
+    def attachment(filename, content_type):
+        return SimpleNamespace(
+            filename=filename, url=f"https://cdn.example/{filename}", content_type=content_type
+        )
+
+    message = SimpleNamespace(attachments=[
+        attachment("cat.png", "image/png"),
+        attachment("notes.pdf", "application/pdf"),
+        # Discord does not always report a content type; guessing "image" from
+        # the name would send the agent off to download a random file.
+        attachment("mystery.bin", None),
+    ])
+    assert _image_attachments(message) == [("cat.png", "https://cdn.example/cat.png")]
+    assert _image_attachments(SimpleNamespace(attachments=[])) == []
+
+
+def test_channel_conversations_remember_what_was_already_seen(tmp_path):
+    path = tmp_path / "discord.bson"
+    convo = ConversationMap(path)
+    try:
+        assert convo.last_seen(channel_key(5)) is None
+        convo.link(channel_key(5), "t1")
+        convo.mark_seen(channel_key(5), 100)
+        convo.mark_seen(channel_key(5), 200)
+        # A watermark set before the thread exists survives being linked.
+        convo.mark_seen(channel_key(6), 7)
+        convo.link(channel_key(6), "t2")
+        assert convo.thread_for(channel_key(6)) == "t2"
+        assert convo.last_seen(channel_key(6)) == 7
+    finally:
+        convo.close()
+
+    convo = ConversationMap(path)
+    try:
+        assert convo.thread_for(channel_key(5)) == "t1"
+        assert convo.last_seen(channel_key(5)) == 200
+    finally:
+        convo.close()
+
+
 # ---------------------------------------------------------------------------
 # Against a live app
 # ---------------------------------------------------------------------------
@@ -205,25 +248,48 @@ def test_first_question_creates_a_thread_and_follow_ups_reuse_it(server, key, co
 
     thread_id = conversations.thread_for(thread_key(42))
     assert thread_id and outcome.thread_id == thread_id
-    assert surface.thread_ids == [thread_id]
     assert surface.titles == ["Are cats mammals?"]
-    assert any("Searching the web" in p for p in surface.progress_updates)
+    # The agent's real label ("Searching the web…") is replaced by a penguin.
+    assert any("🐧" in p for p in surface.progress_updates)
+    assert not any("Searching the web" in p for p in surface.progress_updates)
     assert any("Cats are" in p for p in surface.progress_updates)
 
     (text, uploads), = surface.delivered
     assert text.startswith("Cats are mammals.")
-    assert "**Sources**\n1. [Cat Wiki](<https://cats.example.com>)" in text
+    # No sources footer: a link goes in the sentence, not a numbered list.
+    assert "**Sources**" not in text
     assert uploads == []
     # The answer's message is remembered, so a reply to it continues the thread.
     assert conversations.thread_for(message_key(outcome.message_ids[0])) == thread_id
 
     follow_up = _surface()
     run(_ask(server, key, conversations, thread_key(42), "And dogs?", follow_up))
-    assert follow_up.thread_ids == [thread_id]
     assert follow_up.titles == []  # already named
     thread = state.store.get_thread(thread_id)
     assert [m["role"] for m in thread["messages"]] == ["user", "assistant", "user", "assistant"]
     assert thread["owner"] == "discordbot"
+
+
+def test_a_channel_thread_is_named_rather_than_titled_from_the_question(
+    server, key, conversations, state
+):
+    # A channel question starts with the room's recent messages, so letting the
+    # server auto-title from it would name the thread after someone's chatter.
+    surface = _surface()
+    run(_ask(
+        server, key, conversations, channel_key(3),
+        "[Recent messages in #general]\nbob: lunch?\n\n[The question]\nAre cats mammals?",
+        surface, title="Discord #general",
+    ))
+    thread_id = conversations.thread_for(channel_key(3))
+    assert state.store.get_thread(thread_id)["title"] == "Discord #general"
+    assert surface.titles == []  # nothing for the bot to rename
+
+    # The second question reuses that thread and leaves the name alone.
+    run(_ask(server, key, conversations, channel_key(3), "And dogs?", _surface(),
+             title="Discord #general"))
+    assert conversations.thread_for(channel_key(3)) == thread_id
+    assert state.store.get_thread(thread_id)["title"] == "Discord #general"
 
 
 def test_artifacts_are_downloaded_for_upload(server, key, conversations, state):
@@ -287,16 +353,6 @@ def test_unreachable_server_is_explained(key, conversations):
     outcome = run(_ask("http://127.0.0.1:9", key, conversations, thread_key(1), "hi", surface))
     assert outcome.error == "unreachable"
     assert "can't reach" in surface.delivered[0][0]
-
-
-def test_stop_on_an_idle_thread(server, key, state):
-    thread = state.store.create_thread("discordbot")
-
-    async def go():
-        async with PengyplexityClient(server, key) as api:
-            return await api.stop(thread["_id"])
-
-    assert run(go()) is False
 
 
 def test_cli_check_reads_the_env_file(server, key, tmp_path, monkeypatch, capsys):

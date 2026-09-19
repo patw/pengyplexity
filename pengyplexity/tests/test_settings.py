@@ -5,6 +5,8 @@ Pure logic over a real :class:`Store` (temp dir) — no Flask, no network.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from pengyplexity.config import Config
@@ -13,6 +15,7 @@ from pengyplexity.core.settings import (
     effective_settings,
     raw_overrides,
     save_settings_from_form,
+    user_system_message,
 )
 from pengyplexity.core.store import Store
 
@@ -110,3 +113,67 @@ class TestRawOverrides:
     def test_reflects_stored_values(self, store):
         store.set_setting("model_name", "custom-model")
         assert raw_overrides(store)["model_name"] == "custom-model"
+
+
+class TestUserSystemMessage:
+    def test_none_by_default(self, store):
+        store.create_user("bot", "hash")
+        assert user_system_message(store, "bot") == ""
+
+    def test_reads_and_strips_the_users_own_message(self, store):
+        user = store.create_user("bot", "hash")
+        store.update_user(user["_id"], system_message="  Keep it short.  ")
+        assert user_system_message(store, "bot") == "Keep it short."
+
+    def test_unknown_or_missing_user_is_not_an_error(self, store):
+        assert user_system_message(store, "nobody") == ""
+        assert user_system_message(store, None) == ""
+
+    def test_a_store_without_users_is_not_an_error(self):
+        assert user_system_message(object(), "bot") == ""
+
+
+class TestComposedSystemPrompt:
+    """What actually reaches the agent, from ``turns.apply_effective_settings``."""
+
+    @staticmethod
+    def _state(store, cfg):
+        return SimpleNamespace(store=store, config=cfg, runner=None, memory=None, search=None)
+
+    @staticmethod
+    def _agent():
+        return SimpleNamespace(system_prompt="stale", max_iterations=0)
+
+    def _apply(self, store, cfg, username):
+        from pengyplexity.turns import apply_effective_settings
+
+        agent = self._agent()
+        apply_effective_settings(self._state(store, cfg), agent, username=username)
+        return agent.system_prompt
+
+    def test_no_overrides_means_the_built_in_default(self, store, cfg):
+        store.create_user("bot", "hash")
+        assert self._apply(store, cfg, "bot") is None
+
+    def test_a_users_message_is_appended_to_the_default_not_substituted(self, store, cfg):
+        from pengyplexity.core.agent import SYSTEM_PROMPT  # noqa: F401
+
+        user = store.create_user("bot", "hash")
+        store.update_user(user["_id"], system_message="Keep it short.")
+        prompt = self._apply(store, cfg, "bot")
+        assert prompt.endswith("\n\nKeep it short.")
+        # Replacing the prompt would silently cost the agent its tools.
+        assert "read_image" in prompt and "Never use sudo" in prompt
+
+    def test_it_is_appended_to_an_admin_override_too(self, store, cfg):
+        user = store.create_user("bot", "hash")
+        store.update_user(user["_id"], system_message="Keep it short.")
+        store.set_setting("system_message", "You are Pengy.")
+        assert self._apply(store, cfg, "bot") == "You are Pengy.\n\nKeep it short."
+
+    def test_another_user_is_unaffected(self, store, cfg):
+        bot = store.create_user("bot", "hash")
+        store.update_user(bot["_id"], system_message="Keep it short.")
+        store.create_user("web", "hash")
+        store.set_setting("system_message", "You are Pengy.")
+        assert self._apply(store, cfg, "web") == "You are Pengy."

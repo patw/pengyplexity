@@ -176,6 +176,27 @@ class AuthService:
         pw_hash = hash_password(new_password)
         return self.store.set_user_password(user_id, pw_hash)
 
+    def set_system_message(
+        self,
+        admin_user: Dict[str, Any],
+        user_id: str,
+        message: str,
+    ) -> bool:
+        """Set, or clear with ``""``, a user's own system-prompt addition
+        (admin only). Appended to the system prompt, never a replacement —
+        see ``turns.py: _compose_system_prompt``.
+
+        Raises
+        ------
+        UserNotFoundError
+            If *user_id* doesn't exist.
+        """
+        self._assert_admin(admin_user)
+        user = self.store.get_user_by_id(user_id)
+        if user is None:
+            raise UserNotFoundError("User not found")
+        return self.store.update_user(user_id, system_message=str(message or "").strip())
+
     def change_password(
         self,
         user: Dict[str, Any],

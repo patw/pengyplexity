@@ -97,6 +97,22 @@ def effective_settings(store: Any, config: Any) -> Dict[str, Any]:
     return out
 
 
+def user_system_message(store: Any, username: str | None) -> str:
+    """One user's own system-message addition, or ``""`` if they have none.
+
+    Per-user instructions exist so a single deployment can answer in more than
+    one voice: the Discord bot in a busy channel wants a couple of plain
+    sentences, while the web UI wants the full research write-up with its
+    sources. They are *appended* to the system prompt rather than replacing
+    it — see ``turns.py: _compose_system_prompt`` — so a note about tone can
+    never cost the agent its tool instructions.
+    """
+    if not username or not hasattr(store, "get_user_by_username"):
+        return ""
+    user = store.get_user_by_username(username) or {}
+    return str(user.get("system_message") or "").strip()
+
+
 def render_system_message(template: str, username: str | None = None) -> str:
     """Fill ``{date}``/``{username}``/``{hostname}``/``{osinfo}`` placeholders
     in an admin-set system message template, matching Pengy's

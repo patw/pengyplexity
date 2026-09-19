@@ -116,6 +116,18 @@
                             </div>
                         </td>
                     </tr>
+                    <tr>
+                        <td colspan="5">
+                            <details>
+                                <summary>System message{% if u.get('system_message') %} (custom){% endif %}</summary>
+                                <form method="POST" action="{{ url_for('admin.set_user_system_message', user_id=u['_id']) }}">
+                                    <textarea name="system_message" rows="6" class="form-control"
+                                              placeholder="Extra instructions for this user, appended to the system message. Leave empty for none.">{{ u.get('system_message', '') }}</textarea>
+                                    <button type="submit" class="btn btn-sm btn-primary">Save</button>
+                                </form>
+                            </details>
+                        </td>
+                    </tr>
                     {% endfor %}
                 </tbody>
             </table>

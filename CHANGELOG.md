@@ -12,12 +12,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Discord bot** (`pengyplexity-discord`, new `discord` extra). It runs as its
   own process and uses the JSON API as a dedicated Pengyplexity user, so setup
   is: create the user, make an API key, and fill in three lines of `.env`.
-  @mention the bot and it opens a Discord thread for the question. The answer
-  streams in live, with sources, and any charts or images are attached.
-  Follow-ups in that thread keep the conversation going, and the mapping from
-  Discord to Pengyplexity threads survives restarts. The asker can react ⏹️ to
-  stop an answer. Options: per-user rate limit, channel allowlist, and DMs
-  (off by default). Setup guide in the new **DISCORD.md**.
+  @mention the bot and it answers in the channel. The answer streams in live,
+  and any charts or images are attached. A channel is one
+  rolling conversation, and each question carries the messages posted there
+  since the bot last answered, so it can follow what the room is discussing
+  without being told. Everyone is named: messages are attributed to their
+  author's alias and `@handle`, participants are listed with their permanent
+  Discord ids, and the question says who asked — so memories are about a
+  named person rather than "the user". Image attachments are handed to the
+  agent, which fetches and looks at them itself. The mapping from Discord to
+  Pengyplexity threads survives restarts. Progress shows as a random penguin
+  status line ("🐧 Dreaming of fish…") rather than the agent's tool activity,
+  and there is no stop reaction — stopping a turn part-way stays a web-UI
+  affordance. Options: how much channel context to send, a Discord thread per
+  question instead of channel replies, per-user rate limit, channel allowlist,
+  and DMs (off by default).
+  Setup guide in the new **DISCORD.md**.
+- **Per-user system messages.** A user can be given their own instructions
+  (Admin → User Management → the user's row). They are *appended* to the
+  system prompt rather than replacing it, so one deployment can answer in
+  more than one voice without the agent losing what the default prompt tells
+  it about charts, images, memory and its sandbox. This is how the Discord
+  bot is told to keep replies short and conversational while the web UI keeps
+  its full research write-ups — the bot also no longer appends a numbered
+  **Sources** footer, leaving the model to work a link into a sentence when
+  one is worth having.
 - **JSON API at `/api/v1`** — the groundwork for a Discord bot. A program can
   do everything a user does in the chat UI: create, list, rename and delete
   threads; ask questions with a plain JSON reply or an SSE stream; stop a

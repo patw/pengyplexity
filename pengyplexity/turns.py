@@ -256,6 +256,37 @@ def prime_tool_context(agent, thread_id: str, state) -> None:
     context.artifacts = []
 
 
+def _compose_system_prompt(state, settings, username: str | None) -> str | None:
+    """The system prompt for one turn: the admin's global template (or the
+    built-in default), with that user's own instructions appended.
+
+    A per-user message *adds to* the prompt instead of replacing it. Replacing
+    is what the global override does, and it is the right thing there; doing it
+    per user would mean a note about tone ("you are in a Discord channel, keep
+    it short") silently costing the agent everything the default prompt tells
+    it about charts, images, memory and the sandbox.
+    """
+    from .core.agent import SYSTEM_PROMPT
+    from .core.settings import render_system_message, user_system_message
+
+    def render(text: str) -> str:
+        try:
+            return render_system_message(text, username=username)
+        except (KeyError, IndexError, ValueError):
+            # Bad admin-entered placeholder (e.g. {typo}) — fall back to the
+            # raw template rather than breaking every turn.
+            return text
+
+    base = settings["system_message"]
+    base = render(base) if base else ""
+    extra = user_system_message(state.store, username)
+    if not extra:
+        return base or None
+    if not base:
+        base = SYSTEM_PROMPT.format(max_iterations=int(settings["max_agent_iterations"]))
+    return f"{base}\n\n{render(extra)}"
+
+
 def apply_effective_settings(state, agent, username: str | None = None) -> None:
     """Refresh the shared agent/runner/model/tool-context from the effective
     settings (admin override in the store, else the env-loaded Config) —
@@ -278,22 +309,14 @@ def apply_effective_settings(state, agent, username: str | None = None) -> None:
     A no-op for fakes used in tests (``FakeAgent``/``FakeModelClient`` etc.
     simply lack the attributes this touches, all accessed via ``getattr``).
     """
-    from .core.settings import effective_settings, render_system_message
+    from .core.settings import effective_settings
 
     if agent is None:
         return
     settings = effective_settings(state.store, state.config)
 
     if hasattr(agent, "system_prompt"):
-        raw_message = settings["system_message"]
-        if raw_message:
-            try:
-                raw_message = render_system_message(raw_message, username=username)
-            except (KeyError, IndexError, ValueError):
-                # Bad admin-entered placeholder (e.g. {typo}) — fall back to
-                # the raw template rather than breaking every turn.
-                pass
-        agent.system_prompt = raw_message or None
+        agent.system_prompt = _compose_system_prompt(state, settings, username)
     if hasattr(agent, "max_iterations"):
         agent.max_iterations = int(settings["max_agent_iterations"])
 

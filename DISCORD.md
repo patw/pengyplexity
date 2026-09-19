@@ -1,15 +1,18 @@
 # Pengyplexity — Discord bot
 
-Put Pengyplexity in a Discord server: @mention the bot with a question and
-the answer streams into a Discord thread, with its sources and any charts or
-images attached. It uses the same agent, sandbox and settings as the web UI.
+Put Pengyplexity in a Discord server: @mention the bot with a question and the
+answer streams into the channel, with any charts or images attached. It reads
+the recent messages around it, so it can follow what the room is talking
+about, and it can look at images people post. It uses the same agent, sandbox
+and settings as the web UI.
 
 > For the overview, see the [README](README.md). The bot is an ordinary
 > client of the [JSON API](API.md), and deploying the app itself is in
 > [INSTALLING.md](INSTALLING.md).
 
 **Contents:** [How it works](#how-it-works) · [Setup](#setup) ·
-[Using it](#using-it) · [Settings](#settings) ·
+[Using it](#using-it) · [Giving it a voice](#giving-it-a-voice) ·
+[Settings](#settings) ·
 [Running as a service](#running-as-a-service-systemd) ·
 [Troubleshooting](#troubleshooting)
 
@@ -24,6 +27,20 @@ host or on any machine that can reach the app.
 
 - Every Discord conversation is a Pengyplexity thread in the bot user's
   account. You can read them all in the web UI by logging in as that user.
+  A channel is **one rolling conversation** (named `Discord #channel`), so the
+  bot keeps what it learned there instead of starting fresh at every mention.
+- Each question carries the channel messages posted **since the bot last
+  answered there**, up to `PENGYPLEXITY_DISCORD_HISTORY`. Only the new ones:
+  everything older is already in the Pengyplexity thread, so the same text is
+  never paid for twice.
+- **Everyone is named.** Each message is attributed to its author's alias and
+  unique `@handle`, the people in the conversation are listed once with their
+  permanent Discord ids, and the question says who asked. Without this the
+  agent hears a single anonymous voice and saves memories about "the user",
+  which is worthless in a room with dozens of people in it.
+- The bot still only speaks when spoken to — an @mention, a reply to one of
+  its answers, or a message in a thread it started. It never chimes in
+  uninvited.
 - The bot keeps a small map from Discord conversations to thread ids in
   `~/.pengyplexity/discord.bson`, so conversations survive restarts. If a
   thread is deleted in the web UI, the next message there starts a new one.
@@ -36,18 +53,24 @@ host or on any machine that can reach the app.
 
 **1. Create the bot's Pengyplexity user.** As an admin, open `/admin`, create
 a normal (non-admin) user such as `discord`, log in as it, open **Account**,
-and create an API key. Copy it; it is shown once.
+and create an API key. Copy it; it is shown once. While you are in the admin
+pages, give that user its own system message so it answers like a person in a
+channel rather than filing a report — see
+[Giving it a voice](#giving-it-a-voice).
 
 **2. Create the Discord application.** In the
 [Developer Portal](https://discord.com/developers/applications):
 
 - **New Application** → **Bot** → **Reset Token**, and copy the token.
 - Under **Privileged Gateway Intents**, turn on **Message Content Intent**.
-  The bot needs it to read follow-ups in its threads, which don't mention it.
+  The bot needs it to read follow-ups in its threads, which don't mention it,
+  and to read the surrounding channel messages it uses as context.
 - **OAuth2 → URL Generator**: scope `bot`, with the permissions *View
   Channels*, *Send Messages*, *Send Messages in Threads*, *Create Public
   Threads*, *Read Message History*, *Attach Files*, *Add Reactions* and
   *Embed Links*. Open the generated URL to invite the bot to your server.
+  *Read Message History* is what lets it see the conversation around a
+  question; without it, it still answers, but only from the question itself.
 
 **3. Install and configure.**
 
@@ -78,22 +101,65 @@ uv run pengyplexity-discord
 
 | Where | What happens |
 | --- | --- |
-| **@mention in a channel** | Starts a conversation. The bot opens a thread named after the question and answers there. |
-| **In a thread the bot started** | Every message is a follow-up; no mention needed. |
-| **Reply to one of its answers** | Continues that answer's conversation (for inline replies without threads). |
+| **@mention in a channel** | Answered in the channel, with the recent messages there as context. The channel is one continuing conversation. |
+| **@mention with an image** | The image is passed to the agent, which fetches it and looks at it. A picture with no text still counts as a question. |
+| **Reply to one of its answers** | Continues that answer's conversation. |
 | **@mention in reply to someone's message** | That message is quoted into the question, so "@bot is this true?" works. |
+| **In a thread the bot started** | Every message is a follow-up; no mention needed. (Only with `PENGYPLEXITY_DISCORD_THREADS=1`.) |
 | **DM** (when enabled) | One running conversation per person; send `!new` to start fresh. |
 
-While it works, the bot edits a single progress message: first the tool
-activity ("Searching the web…"), then the answer as it is written. React
-**⏹️** on that message to stop it; only the person who asked can do this. The
-final answer replaces the progress message and is split across messages if it
-is over 2,000 characters. Sources are listed without link previews. Charts
-and images are attached in a message of their own.
+While it works, the bot edits a single progress message: a penguin doing
+something penguin-ish ("🐧 Dreaming of fish…"), then the answer as it is
+written. That line is flavour, not a report — a channel is no place to watch
+tool calls, so the agent's real activity labels are dropped and a random one
+is shown instead. The final answer replaces the progress message and is split
+across messages if it is over 2,000 characters. Charts and images are attached
+in a message of their own.
+
+**There is no stop button.** A turn runs to completion; stopping one part-way
+is a web-UI affordance and stays there.
+
+Images work the other way round from everything else: the API takes a string,
+so a picture cannot ride along with the question. Instead the bot passes the
+attachment's URL, and the agent downloads it into the thread workspace and
+views it with its own image tools. That means an image the bot can see is one
+Discord will serve — it does not re-upload the bytes itself.
 
 Questions sent while the conversation is still answering get a ⏳ reaction
 and are answered in order. Answers never ping anyone: `@everyone` or a user
 mention in an answer is shown as text only.
+
+## Giving it a voice
+
+Out of the box the agent answers like a research tool: structured markdown
+ending in a numbered list of sources. That reads well in the web UI and badly
+in a chat channel, where it comes across as a bot filing a report.
+
+Fix it by giving the bot's Pengyplexity user its own instructions, under
+**Admin → User Management → the bot's row → System message**. A user's
+instructions are *appended* to the system prompt rather than replacing it, so
+the agent keeps everything it knows about charts, images, memory and its
+sandbox — you are only changing how it talks. Other users, including whoever
+uses the web UI, are unaffected.
+
+A starting point:
+
+```text
+You are talking in a Discord channel, not writing a report. These
+instructions override anything above about format and citations.
+
+- Keep it to a few sentences. No headings, no bullet lists, no bold labels,
+  unless someone actually asks for a list.
+- Lead with the answer. No preamble and no restating the question.
+- Still search the web before answering anything factual, but never add a
+  "Sources:" section and never use [n] citation markers. If one link is
+  genuinely worth having, put it in a sentence as <https://example.com>.
+- Talk like a person: contractions, plain words, dry humour when it fits.
+- If you don't know, say so in one sentence rather than hedging at length.
+```
+
+The bot never appends a sources list of its own, so the only links that
+appear are the ones the model chose to write into the answer.
 
 ## Settings
 
@@ -104,7 +170,9 @@ mention in an answer is shown as text only.
 | `PENGYPLEXITY_API_KEY` | *(required)* | The bot user's API key (`pgy_…`) |
 | `PENGYPLEXITY_DISCORD_CHANNELS` | *(all)* | Comma-separated channel IDs to answer in; threads count as their parent channel |
 | `PENGYPLEXITY_DISCORD_ALLOW_DMS` | `0` | Answer direct messages |
-| `PENGYPLEXITY_DISCORD_THREADS` | `1` | Open a thread per question; `0` replies inline in the channel |
+| `PENGYPLEXITY_DISCORD_THREADS` | `0` | `0` answers in the channel, one rolling conversation per channel; `1` opens a Discord thread per question |
+| `PENGYPLEXITY_DISCORD_HISTORY` | `20` | Channel messages of context sent with a question; `0` = none |
+| `PENGYPLEXITY_DISCORD_IMAGES` | `1` | Pass image attachments to the agent to fetch and look at |
 | `PENGYPLEXITY_DISCORD_USER_RATE_LIMIT` | `6` | Questions per Discord user per minute; `0` = no limit |
 | `PENGYPLEXITY_DISCORD_MAX_UPLOAD_MB` | `10` | Largest artifact to attach (Discord's limit depends on the server's boosts) |
 | `PENGYPLEXITY_DISCORD_STATE` | `<data dir>/discord.bson` | The conversation map |
@@ -164,8 +232,19 @@ disabled or deleted. Make a new key on that user's Account page. Run
 that the channel is in `PENGYPLEXITY_DISCORD_CHANNELS` if you set it, and
 that you mentioned the bot itself rather than a role with the same name.
 
-**It replies inline instead of opening threads** — it lacks *Create Public
-Threads* in that channel. The log says so.
+**It answers in the channel instead of opening threads** — that is the
+default. Set `PENGYPLEXITY_DISCORD_THREADS=1` for a thread per question. If it
+is already `1` and you still get channel replies, the bot lacks *Create Public
+Threads* there; the log says so.
+
+**It doesn't seem to know what the channel was talking about** — it needs
+*Read Message History* in that channel, and `PENGYPLEXITY_DISCORD_HISTORY`
+above `0`. Note it only ever sees messages posted *after* its last answer
+there, so the very first question in a channel has little to go on.
+
+**It says it can't see an image** — the agent fetches the attachment from
+Discord itself, so the app's host needs outbound network access to
+`cdn.discordapp.com`. Check `PENGYPLEXITY_DISCORD_IMAGES=1` too.
 
 **Answers arrive in one lump** — the proxy is buffering the SSE response. Set
 `proxy_buffering off` as in [INSTALLING.md](INSTALLING.md).

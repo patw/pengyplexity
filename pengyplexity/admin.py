@@ -180,6 +180,28 @@ def reset_password(user_id: str):
         return redirect(url_for("admin.list_users", error="User not found"))
 
 
+@admin_bp.route("/users/<user_id>/system-message", methods=["POST"])
+def set_user_system_message(user_id: str):
+    """Set one user's own instructions, appended to the system prompt.
+
+    This is how a single deployment answers in more than one voice — e.g. the
+    Discord bot's user is told to keep it to a few sentences and skip the
+    sources list, while the web UI keeps the full research write-up.
+    """
+    user, err = _guard()
+    if err:
+        return err
+
+    state = get_state(current_app)
+    message = request.form.get("system_message", "")
+    try:
+        state.auth.set_system_message(user, user_id, message)
+    except UserNotFoundError:
+        return redirect(url_for("admin.list_users", error="User not found"))
+    what = "set" if message.strip() else "cleared"
+    return redirect(url_for("admin.list_users", success=f"System message {what}"))
+
+
 @admin_bp.route("/settings", methods=["GET", "POST"])
 def settings():
     """View/edit the global, admin-only settings (system message, model

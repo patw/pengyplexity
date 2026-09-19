@@ -1,7 +1,7 @@
 """Async client for the Pengyplexity JSON API, as the Discord bot uses it.
 
 Only the calls the bot needs: who am I, create a thread, ask a question
-(streamed), stop a turn, and download an artifact. Every failure — an HTTP
+(streamed), and download an artifact. Every failure — an HTTP
 error, an unreachable server — surfaces as :class:`ApiError` carrying the
 API's stable ``code``, so callers switch on codes rather than on exception
 types. The API itself is documented in API.md.
@@ -162,10 +162,6 @@ class PengyplexityClient:
 
     async def create_thread(self, title: Optional[str] = None) -> Dict[str, Any]:
         return await self._request("POST", "/threads", {"title": title} if title else {})
-
-    async def stop(self, thread_id: str) -> bool:
-        body = await self._request("POST", f"/threads/{thread_id}/stop")
-        return bool((body or {}).get("stopped"))
 
     async def ask(
         self, thread_id: str, content: str

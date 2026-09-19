@@ -209,6 +209,17 @@ class TestAdminCRUD:
         with pytest.raises(UserNotFoundError):
             auth.reset_password(admin_user, "no-such-id", "newpass")
 
+    def test_set_system_message_stores_and_clears(self, store, auth, admin_user):
+        target = auth.create_user(admin_user, "bot", "bot-pass")
+        auth.set_system_message(admin_user, target["_id"], "  Keep it short.  ")
+        assert store.get_user_by_id(target["_id"])["system_message"] == "Keep it short."
+        auth.set_system_message(admin_user, target["_id"], "")
+        assert store.get_user_by_id(target["_id"])["system_message"] == ""
+
+    def test_set_system_message_nonexistent_user(self, store, auth, admin_user):
+        with pytest.raises(UserNotFoundError):
+            auth.set_system_message(admin_user, "no-such-id", "hi")
+
     def test_delete_nonexistent_user(self, store, auth, admin_user):
         with pytest.raises(UserNotFoundError):
             auth.delete_user(admin_user, "no-such-id")
@@ -229,6 +240,11 @@ class TestNonAdminBlocked:
         bob = store.create_user("bob", hash_password("bob-pass"), is_admin=False)
         with pytest.raises(NotAdminError):
             auth.list_users(bob)
+
+    def test_non_admin_cannot_set_a_system_message(self, store, auth, admin_user):
+        bob = store.create_user("bob", hash_password("bob-pass"), is_admin=False)
+        with pytest.raises(NotAdminError):
+            auth.set_system_message(bob, bob["_id"], "answer however I like")
 
     def test_non_admin_cannot_get_user(self, store, auth, admin_user):
         bob = store.create_user("bob", hash_password("bob-pass"), is_admin=False)
