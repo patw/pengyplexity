@@ -129,9 +129,23 @@ is a web-UI affordance and stays there.
 
 Images work the other way round from everything else: the API takes a string,
 so a picture cannot ride along with the question. Instead the bot passes the
-attachment's URL, and the agent downloads it into the thread workspace and
-views it with its own image tools. That means an image the bot can see is one
-Discord will serve — it does not re-upload the bytes itself.
+picture's URL, and the agent downloads it into the thread workspace and views
+it with its own image tools. That means an image the bot can see is one the
+web will serve — it does not re-upload the bytes itself.
+
+All three ways a picture reaches a channel count: a file attachment, a bare
+image link in the text, and a link Discord resolved into an embed (an imgur
+page, a Tenor GIF). So do pictures in the room's **recent messages**, not just
+in the message that mentioned the bot — "what's in the screenshot above?" is
+an ordinary question. Up to six pictures are offered per question, the ones on
+the question itself first, then the channel's newest.
+
+Two things it still cannot see. A picture posted before the bot last answered
+in that channel is not re-offered — its URL already went to the Pengyplexity
+thread on an earlier turn, and re-sending it every turn would pay for it
+every turn. And a link pasted in the *same* message that mentions the bot is
+only seen if the URL itself ends in `.png`/`.jpg`/etc., because Discord
+attaches the embed a moment after the message arrives.
 
 Questions sent while the conversation is still answering get a ⏳ reaction
 and are answered in order. Answers never ping anyone: `@everyone` or a user
@@ -141,16 +155,19 @@ mention in an answer is shown as text only.
 
 Out of the box the agent answers like a research tool: structured markdown
 ending in a numbered list of sources. That reads well in the web UI and badly
-in a chat channel, where it comes across as a bot filing a report.
+in a chat channel, where it comes across as a bot filing a report. A channel
+also asks two things of it that a single-user web session does not: work out
+which of several people it is talking to, and look at the pictures they post.
 
 Fix it by giving the bot's Pengyplexity user its own instructions, under
 **Admin → User Management → the bot's row → System message**. A user's
 instructions are *appended* to the system prompt rather than replacing it, so
 the agent keeps everything it knows about charts, images, memory and its
-sandbox — you are only changing how it talks. Other users, including whoever
-uses the web UI, are unaffected.
+sandbox — you are adding to it, not replacing it. Other users, including
+whoever uses the web UI, are unaffected.
 
-A starting point:
+A starting point — the first bullets are about tone, the rest about the two
+habits a channel needs:
 
 ```text
 You are talking in a Discord channel, not writing a report. These
@@ -164,6 +181,20 @@ instructions override anything above about format and citations.
   genuinely worth having, put it in a sentence as <https://example.com>.
 - Talk like a person: contractions, plain words, dry humour when it fits.
 - If you don't know, say so in one sentence rather than hedging at length.
+- Before you answer, search_memory for whoever is asking — by display name
+  and by @handle, both of which the question tells you. You are talking to
+  many different people in the same account, each conversation here starts
+  over often, and what you already know about this one is in your memories
+  rather than in front of you. Do it even when the question looks
+  self-contained: knowing which of them asked is usually the difference
+  between a useful answer and a generic one.
+- Search memory for the *subject* too when a question refers to something
+  the room has been working on ("how's the deploy going?").
+- Save what is worth keeping about a person, and say in the memory who it is
+  about, with their @handle. A memory that says "the user" is worthless here.
+- When a question is about a picture, look at it. The question lists the URL
+  of every picture in play: download_file it, then read_image. Never answer
+  about an image from its filename or from what people said about it.
 ```
 
 The bot never appends a sources list of its own, so the only links that

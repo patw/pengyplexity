@@ -176,24 +176,76 @@ def test_conversation_map_persists_across_restarts(tmp_path):
         convo.close()
 
 
+def _attachment(filename, content_type="image/png"):
+    return SimpleNamespace(
+        filename=filename, url=f"https://cdn.example/{filename}", content_type=content_type
+    )
+
+
+def _embed(image=None, thumbnail=None, url=None):
+    media = lambda u: SimpleNamespace(url=u)  # noqa: E731 - discord.py's proxy shape
+    return SimpleNamespace(image=media(image), thumbnail=media(thumbnail), url=url)
+
+
+def _message(content="", attachments=(), embeds=()):
+    return SimpleNamespace(content=content, attachments=list(attachments), embeds=list(embeds))
+
+
 def test_only_image_attachments_are_offered_to_the_agent():
     pytest.importorskip("discord")
-    from pengyplexity.discordbot.bot import _image_attachments
+    from pengyplexity.discordbot.bot import _images_in
 
-    def attachment(filename, content_type):
-        return SimpleNamespace(
-            filename=filename, url=f"https://cdn.example/{filename}", content_type=content_type
-        )
-
-    message = SimpleNamespace(attachments=[
-        attachment("cat.png", "image/png"),
-        attachment("notes.pdf", "application/pdf"),
+    message = _message(attachments=[
+        _attachment("cat.png", "image/png"),
+        _attachment("notes.pdf", "application/pdf"),
         # Discord does not always report a content type; guessing "image" from
         # the name would send the agent off to download a random file.
-        attachment("mystery.bin", None),
+        _attachment("mystery.bin", None),
+        _attachment("dog.jpg", None),
     ])
-    assert _image_attachments(message) == [("cat.png", "https://cdn.example/cat.png")]
-    assert _image_attachments(SimpleNamespace(attachments=[])) == []
+    found = _images_in(message, "with the question")
+    assert [(i.filename, i.url) for i in found] == [
+        ("cat.png", "https://cdn.example/cat.png"),
+        ("dog.jpg", "https://cdn.example/dog.jpg"),
+    ]
+    assert all(i.source == "with the question" for i in found)
+    assert _images_in(_message(), "x") == []
+
+
+def test_pasted_and_embedded_pictures_count_too():
+    pytest.importorskip("discord")
+    from pengyplexity.discordbot.bot import _images_in
+
+    # A bare link in the text, and a link Discord resolved into an embed.
+    message = _message(
+        content="is this https://i.example/cat.png the same as that?",
+        embeds=[_embed(image="https://media.example/dog.jpg", url="https://example.com/dog")],
+    )
+    assert [i.url for i in _images_in(message, "here")] == [
+        "https://i.example/cat.png",
+        "https://media.example/dog.jpg",
+    ]
+
+
+def test_an_embedded_link_is_not_listed_twice_or_as_a_web_page():
+    pytest.importorskip("discord")
+    from pengyplexity.discordbot.bot import _images_in
+
+    # Discord embeds a pasted image link, so the same URL arrives both ways.
+    pasted = _message(
+        content="https://i.example/cat.png",
+        embeds=[_embed(image="https://i.example/cat.png", url="https://i.example/cat.png")],
+    )
+    assert [i.url for i in _images_in(pasted, "here")] == ["https://i.example/cat.png"]
+
+    # A Tenor GIF has only a thumbnail; its own URL serves a web page.
+    tenor = _message(embeds=[_embed(thumbnail="https://media.tenor.com/x.gif",
+                                    url="https://tenor.com/view/x-gif-1")])
+    assert [i.url for i in _images_in(tenor, "here")] == ["https://media.tenor.com/x.gif"]
+
+    # An ordinary link embed carries no picture at all.
+    article = _message(embeds=[_embed(url="https://example.com/article")])
+    assert _images_in(article, "here") == []
 
 
 def test_channel_conversations_remember_what_was_already_seen(tmp_path):

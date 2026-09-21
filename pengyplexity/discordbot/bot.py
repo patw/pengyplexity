@@ -15,9 +15,14 @@ How it answers:
 
 It only speaks when spoken to, but it does not listen only to the person who
 asked: each question carries the channel messages posted since the bot last
-answered there, so "what do you all think?" has something to refer to. Image
-attachments are passed as URLs for the agent to fetch and view itself — the
-API takes a string, so the picture cannot ride along with the question.
+answered there, so "what do you all think?" has something to refer to.
+
+Pictures are passed as URLs for the agent to fetch and view itself — the API
+takes a string, so the bytes cannot ride along with the question. Everything
+a message can carry a picture as counts: a file attachment, a link Discord
+turned into an embed, and a bare image URL in the text. They are collected
+from the room's recent messages too, not just the one that mentioned the bot,
+because "what is that thing in the screenshot above?" is an ordinary question.
 
 While a turn runs, the bot edits one progress message live: a penguin-flavoured
 status line, then the answer as it streams. There is no stop button — that is a
@@ -39,12 +44,16 @@ from .apiclient import PengyplexityClient
 from .config import BotConfig
 from .conversations import ConversationMap, channel_key, dm_key, message_key, thread_key
 from .render import (
+    Image,
     Speaker,
     build_question,
     clean_question,
-    describe_attachments,
+    describe_images,
     format_history,
     format_roster,
+    image_filename,
+    image_links,
+    looks_like_image_url,
     penguin_activity,
     progress_text,
     quote_context,
@@ -159,7 +168,8 @@ class PengyplexityBot(discord.Client):
             channels={c.id: getattr(c, "name", "channel") for c in msg.channel_mentions},
         )
 
-    def _question(self, message: discord.Message) -> str:
+    def _question(self, message: discord.Message) -> Tuple[str, List[Image]]:
+        """What was asked, and the pictures that came with it."""
         question = self._clean(message)
         ref = message.reference
         resolved = ref.resolved if ref is not None else None
@@ -167,32 +177,37 @@ class PengyplexityBot(discord.Client):
         if question and replied is not None and replied.author != self.user and replied.content:
             question = quote_context(_speaker(replied.author).label, self._clean(replied), question)
 
-        images: List[Tuple[str, str]] = []
+        images: List[Image] = []
         if self.config.send_images:
-            images = _image_attachments(message)
+            images = _images_in(message, "with the question")
             if replied is not None:
-                images += _image_attachments(replied)
+                who = _speaker(replied.author).label
+                images += _images_in(replied, f"in the message this replies to, from {who}")
         if not question and images:
             # A mention carrying nothing but a picture is still a question.
             question = "Look at the attached image and tell me about it."
-        if question and images:
-            question = f"{question}\n\n{describe_attachments(images)}"
-        return question
+        return question, images
 
     async def _channel_context(
         self, message: discord.Message, key: Optional[str]
-    ) -> Tuple[str, List[Speaker]]:
-        """The messages posted here since the model last heard from this channel,
-        and who wrote them.
+    ) -> Tuple[str, List[Speaker], List[Image]]:
+        """The messages posted here since the model last heard from this channel:
+        their text, who wrote them, and any pictures in them.
 
         Only what is new: everything older is already in the Pengyplexity
         thread, so re-sending it would pay for the same tokens every turn.
+
+        A picture is collected even when its message has no text at all — a
+        screenshot posted with no caption is exactly the one the next question
+        is about. The pictures come back newest first, which is the order the
+        cap in :func:`describe_images` keeps.
         """
         limit = self.config.history_lines
         if limit <= 0 or key is None or isinstance(message.channel, discord.DMChannel):
-            return "", []
+            return "", [], []
         seen = self.conversations.last_seen(key)
         entries: List[Tuple[Speaker, str]] = []
+        images: List[Image] = []
         try:
             async for past in message.channel.history(limit=limit, before=message):
                 # Newest first, so the first already-seen message ends the walk.
@@ -201,18 +216,21 @@ class PengyplexityBot(discord.Client):
                 # Its own answers are already the thread's assistant turns.
                 if past.author.id == self.user.id:
                     continue
+                speaker = _speaker(past.author)
+                if self.config.send_images:
+                    images += _images_in(past, f"posted earlier here by {speaker.label}")
                 text = self._clean(past)
                 names = [a.filename for a in past.attachments]
                 if names:
                     text = " ".join([text, *(f"[attached {n}]" for n in names)]).strip()
                 if text:
-                    entries.append((_speaker(past.author), text))
+                    entries.append((speaker, text))
         except discord.HTTPException as e:
             # Usually a missing 'Read Message History'; answer without context.
             log.debug("Could not read history in %s: %s", message.channel, e)
-            return "", []
+            return "", [], []
         entries.reverse()
-        return format_history(entries), [speaker for speaker, _ in entries]
+        return format_history(entries), [speaker for speaker, _ in entries], images
 
     async def _open_conversation(self, message: discord.Message, question: str) -> Route:
         channel = message.channel
@@ -251,7 +269,7 @@ class PengyplexityBot(discord.Client):
         if route is None:
             return
 
-        question = self._question(message)
+        question, images = self._question(message)
         if not question:
             if route.new:
                 await _quietly(message.reply(
@@ -282,7 +300,7 @@ class PengyplexityBot(discord.Client):
         )
         if reason:
             log.info("Starting a fresh conversation for %s (%s).", route.key, reason)
-        history, speakers = await self._channel_context(message, route.key)
+        history, speakers, past_images = await self._channel_context(message, route.key)
         asker = _speaker(message.author)
         question = build_question(
             question,
@@ -290,6 +308,9 @@ class PengyplexityBot(discord.Client):
             history=history,
             # One line each, asker first; pointless when nobody else spoke.
             roster=format_roster([asker, *speakers]) if speakers else "",
+            # The question's own pictures first: the cap keeps what comes
+            # first, and those are the ones it is most likely about.
+            images=describe_images(images + past_images),
             channel=getattr(message.channel, "name", None),
         )
         await self._answer(message, route, question)
@@ -426,13 +447,63 @@ def _speaker(user) -> Speaker:
     return Speaker(display_name=alias, username=handle, user_id=getattr(user, "id", 0) or 0)
 
 
-def _image_attachments(message: discord.Message) -> List[Tuple[str, str]]:
-    """The message's image attachments, as ``(filename, url)``."""
-    return [
-        (a.filename, a.url)
-        for a in message.attachments
-        if (a.content_type or "").startswith("image/")
-    ]
+def _is_image_attachment(attachment: discord.Attachment) -> bool:
+    """Discord usually reports a content type; when it doesn't, the filename
+    is the only evidence there is, and it has to actually look like a picture
+    — guessing would send the agent off to download a random file."""
+    content_type = (attachment.content_type or "").strip()
+    if content_type:
+        return content_type.startswith("image/")
+    return looks_like_image_url(attachment.filename)
+
+
+def _embed_image_url(embed: discord.Embed) -> Optional[str]:
+    """The picture behind a link Discord turned into an embed, if there is one.
+
+    This is how a pasted imgur or Tenor link becomes something the agent can
+    look at: the link itself serves a web page, but ``image``/``thumbnail``
+    point at the media. ``image`` is the full-size one, so it wins; a Tenor
+    GIF only has the thumbnail. ``embed.video`` is deliberately ignored —
+    ``read_image`` cannot open an mp4.
+    """
+    for candidate in (embed.image, embed.thumbnail):
+        url = getattr(candidate, "url", None)
+        if url:
+            return str(url)
+    # Only when the link *is* the picture; otherwise this is the page's URL.
+    url = getattr(embed, "url", None)
+    return str(url) if url and looks_like_image_url(url) else None
+
+
+def _images_in(message: discord.Message, source: str) -> List[Image]:
+    """Every picture one Discord message carries.
+
+    Three ways a picture gets into a channel, and only the first was ever
+    handled: attached as a file, pasted as a bare image URL, or linked and
+    embedded by Discord. The embeds are checked last because a pasted link
+    also produces one, and the text match names the file better.
+
+    An embed arrives on a *later* gateway event than the message it belongs
+    to, so a link pasted in the very message that mentions the bot may not
+    have one yet — that case is caught by the URL in the text instead.
+    """
+    found: List[Image] = []
+    seen = set()
+
+    def add(filename: str, url: Optional[str]) -> None:
+        if url and url not in seen:
+            seen.add(url)
+            found.append(Image(filename, url, source))
+
+    for attachment in message.attachments:
+        if _is_image_attachment(attachment):
+            add(attachment.filename, attachment.url)
+    for filename, url in image_links(message.content or ""):
+        add(filename, url)
+    for embed in message.embeds:
+        url = _embed_image_url(embed)
+        add(image_filename(url or ""), url)
+    return found
 
 
 async def _quietly(coro) -> None:

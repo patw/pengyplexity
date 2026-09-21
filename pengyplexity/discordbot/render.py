@@ -7,10 +7,12 @@ that fit Discord's limits.
 
 from __future__ import annotations
 
+import posixpath
 import random
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from urllib.parse import urlsplit
 
 MESSAGE_LIMIT = 2000
 THREAD_NAME_LIMIT = 100
@@ -54,8 +56,14 @@ DEFAULT_ACTIVITY = "Thinking about fish…"
 # turn, so the room's chatter gets a small, fixed allowance.
 MAX_HISTORY_CHARS = 8000
 MAX_HISTORY_LINE = 500
-# Image attachments described to the model in one question.
-MAX_ATTACHMENTS = 4
+# Pictures described to the model in one question. Each one the agent looks
+# at costs a download and a vision call, so the whole conversation — the
+# question, the message it replies to, and the room's recent messages — shares
+# this allowance rather than getting one each.
+MAX_IMAGES = 6
+# What a URL has to end in before the bot calls it a picture. Discord's own
+# CDN links carry a query string, which is why only the path is examined.
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".avif", ".heic")
 # People listed in the roster that precedes a question.
 MAX_ROSTER = 20
 
@@ -63,6 +71,10 @@ _USER_MENTION = re.compile(r"<@!?(\d+)>")
 _ROLE_MENTION = re.compile(r"<@&(\d+)>")
 _CHANNEL_MENTION = re.compile(r"<#(\d+)>")
 _CUSTOM_EMOJI = re.compile(r"<a?(:\w+:)\d+>")
+# Discord wraps a link in <> to suppress its embed, and people end sentences
+# with links, so the trailing punctuation comes off separately.
+_URL_IN_TEXT = re.compile(r"https?://[^\s<>\"']+")
+_URL_TAIL = ".,;:!?)]}'\"…"
 
 
 # ── Discord → question ─────────────────────────────────────────────────────
@@ -180,15 +192,17 @@ def build_question(
     asker: Optional[Speaker] = None,
     history: str = "",
     roster: str = "",
+    images: str = "",
     channel: Optional[str] = None,
 ) -> str:
     """Assemble what the agent is actually asked.
 
     The question stays last and is labelled, so the model — and the server's
     thread auto-titling, which reads the start of the first question — can
-    tell it apart from the context in front of it.
+    tell it apart from the context in front of it. The pictures go just above
+    it, nearest the thing they are probably about.
     """
-    if asker is None and not history.strip():
+    if asker is None and not history.strip() and not images.strip():
         return question
     parts: List[str] = []
     if asker is not None:
@@ -196,39 +210,109 @@ def build_question(
         parts.append(
             f"[Discord {where}. Several people talk here, so refer to each by "
             'name or @handle — never "the user" — and say who a memory is '
-            "about when you save one.]"
+            f"about when you save one. Before you answer, search_memory for "
+            f"{asker.label}, the person asking — a conversation here starts "
+            "over often, so what you already know about them lives in your "
+            "memories rather than in this thread.]"
         )
     if roster.strip():
         parts.append("[People in this conversation]\n" + roster.strip())
     if history.strip():
-        parts.append(
-            "[Recent messages, for context — the question follows]\n" + history.strip()
-        )
+        parts.append("[Recent messages, for context]\n" + history.strip())
+    if images.strip():
+        parts.append(images.strip())
     head = f"[The question, from {asker.full}]" if asker is not None else "[The question]"
     parts.append(f"{head}\n{question}")
     return "\n\n".join(parts)
 
 
-def describe_attachments(
-    items: Sequence[Tuple[str, str]], max_files: int = MAX_ATTACHMENTS
-) -> str:
-    """Tell the model about image attachments, and how to actually look at them.
+@dataclass(frozen=True)
+class Image:
+    """A picture somewhere in the conversation, and where it came from.
+
+    *source* is what the model is told about its provenance — "attached to the
+    question", "posted by Alice earlier in the channel". Which picture someone
+    means is usually a matter of who posted it and when, so a list of bare
+    URLs is not enough.
+    """
+
+    filename: str
+    url: str
+    source: str = ""
+
+    @property
+    def label(self) -> str:
+        return f"{self.filename} ({self.source})" if self.source else self.filename
+
+
+def looks_like_image_url(url: str) -> bool:
+    """Whether a URL (or a filename) points at a picture.
+
+    Only the path is examined: a Discord CDN link ends in
+    ``cat.png?ex=…&is=…&hm=…``, and every one of those would be missed by a
+    plain ``endswith``.
+    """
+    path = urlsplit(str(url or "")).path or ""
+    return path.lower().endswith(IMAGE_SUFFIXES)
+
+
+def image_filename(url: str, fallback: str = "image") -> str:
+    """A name for a picture that arrived as a bare URL."""
+    name = posixpath.basename(urlsplit(str(url or "")).path or "")
+    return name or fallback
+
+
+def image_links(text: str) -> List[Tuple[str, str]]:
+    """Image URLs pasted into a message's text, as ``(filename, url)``.
+
+    Someone dropping a link to a picture is asking about a picture just as
+    much as someone attaching one, but Discord reports it as ordinary text.
+    Only URLs that end in an image extension count — guessing at the rest
+    would send the agent off to download web pages.
+    """
+    found: List[Tuple[str, str]] = []
+    seen = set()
+    for match in _URL_IN_TEXT.finditer(text or ""):
+        url = match.group(0).rstrip(_URL_TAIL)
+        if url in seen or not looks_like_image_url(url):
+            continue
+        seen.add(url)
+        found.append((image_filename(url), url))
+    return found
+
+
+def describe_images(images: Sequence[Image], max_files: int = MAX_IMAGES) -> str:
+    """Tell the model which pictures are in play, and how to actually look.
 
     An image cannot ride in the question — the API takes a string. What does
     work is the tool pair the agent already has: ``download_file`` pulls the
-    Discord CDN URL into the thread workspace and ``read_image`` hands it to
-    the vision model. Naming both is what makes it reliable; given a bare URL
-    the agent tends to reach for ``fetch_url``, which would only return HTML.
+    URL into the thread workspace and ``read_image`` hands it to the vision
+    model. Naming both is what makes it reliable; given a bare URL the agent
+    tends to reach for ``fetch_url``, which would only return HTML.
+
+    *images* arrive most-relevant first — the question's own attachments, then
+    the room's, newest first — because that is the order the cap keeps.
     """
-    lines = [f"- {name}: {url}" for name, url in items[:max_files]]
-    if not lines:
+    kept: List[Image] = []
+    seen = set()
+    for image in images:
+        if not image.url or image.url in seen:
+            continue
+        seen.add(image.url)
+        if len(kept) < max_files:
+            kept.append(image)
+    if not kept:
         return ""
-    dropped = len(items) - len(lines)
+    lines = [f"- {image.label}: {image.url}" for image in kept]
+    dropped = len(seen) - len(kept)
     if dropped > 0:
         lines.append(f"- (and {dropped} more, not listed)")
     return (
-        "[Images attached to this message. Use download_file to save each one "
-        "into the workspace, then read_image to look at it.]\n" + "\n".join(lines)
+        "[Pictures in this conversation. To look at one, use download_file to "
+        "save its URL into the workspace, then read_image — that is the only "
+        "way to see it, and fetch_url cannot. Anything the question is about "
+        "is worth opening, including a picture someone posted earlier.]\n"
+        + "\n".join(lines)
     )
 
 

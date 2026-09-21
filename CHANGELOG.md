@@ -48,9 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without being told. Everyone is named: messages are attributed to their
   author's alias and `@handle`, participants are listed with their permanent
   Discord ids, and the question says who asked — so memories are about a
-  named person rather than "the user". Image attachments are handed to the
-  agent, which fetches and looks at them itself. The mapping from Discord to
-  Pengyplexity threads survives restarts. Progress shows as a random penguin
+  named person rather than "the user", and each question tells the agent to
+  look up what it already knows about the person asking before answering,
+  since a rolling conversation starts over but the memories do not. Pictures
+  are handed to the agent as URLs, which it fetches and looks at itself: file
+  attachments, bare image links, and links Discord embedded (imgur, Tenor),
+  from the room's recent messages as well as the question's own message. The
+  mapping from Discord to Pengyplexity threads survives restarts. Progress shows as a random penguin
   status line ("🐧 Dreaming of fish…") rather than the agent's tool activity,
   and there is no stop reaction — stopping a turn part-way stays a web-UI
   affordance. Options: how much channel context to send, a Discord thread per

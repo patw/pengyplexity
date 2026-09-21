@@ -8,12 +8,15 @@ from pengyplexity.discordbot import render
 from pengyplexity.discordbot.render import (
     MESSAGE_LIMIT,
     PENGUIN_ACTIVITIES,
+    Image,
     Speaker,
     build_question,
     clean_question,
     describe_api_error,
-    describe_attachments,
+    describe_images,
     format_history,
+    image_links,
+    looks_like_image_url,
     format_roster,
     penguin_activity,
     progress_text,
@@ -243,23 +246,109 @@ class TestBuildQuestion:
         out = build_question("hi", asker=ALICE, channel="general")
         assert '"the user"' in out and "never" in out
 
+    def test_it_asks_for_the_askers_memories_by_name(self):
+        # A rolling channel conversation rolls over; what the bot knows about
+        # a person is in its memories, not in the thread it happens to be in.
+        out = build_question("hi", asker=ALICE, channel="general")
+        assert "search_memory" in out and "Alice (@alice_dev)" in out
+
+    def test_pictures_sit_between_the_history_and_the_question(self):
+        out = build_question(
+            "what is that?", asker=ALICE, history="@bob: look",
+            images=describe_images([Image("cat.png", "https://cdn.example/cat.png")]),
+            channel="general",
+        )
+        assert out.index("@bob: look") < out.index("cat.png") < out.index("[The question")
+
+    def test_pictures_alone_are_enough_to_build_a_question(self):
+        images = describe_images([Image("cat.png", "https://cdn.example/cat.png")])
+        assert "cat.png" in build_question("what is that?", images=images)
+
     def test_a_dm_is_not_described_as_a_channel(self):
         out = build_question("hi", asker=BOB)
         assert "direct message" in out and "#" not in out.splitlines()[0]
 
 
-class TestDescribeAttachments:
+class TestLooksLikeImageUrl:
+    def test_plain_image_urls(self):
+        assert looks_like_image_url("https://cdn.example/cat.PNG")
+        assert looks_like_image_url("cat.jpeg")
+        assert not looks_like_image_url("https://example.com/article")
+        assert not looks_like_image_url("notes.pdf")
+
+    def test_a_discord_cdn_link_keeps_its_query_string(self):
+        # Every Discord attachment URL looks like this; an endswith() check
+        # would see none of them.
+        assert looks_like_image_url(
+            "https://cdn.discordapp.com/attachments/1/2/cat.png?ex=abc&is=def&hm=99"
+        )
+
+    def test_nothing_is_not_an_image(self):
+        assert not looks_like_image_url("")
+        assert not looks_like_image_url(None)
+
+
+class TestImageLinks:
+    def test_finds_a_pasted_picture(self):
+        assert image_links("look at https://i.example/cat.png please") == [
+            ("cat.png", "https://i.example/cat.png")
+        ]
+
+    def test_ignores_ordinary_links(self):
+        assert image_links("https://example.com/some/article") == []
+
+    def test_trailing_punctuation_is_not_part_of_the_url(self):
+        assert image_links("see https://i.example/cat.png.") == [
+            ("cat.png", "https://i.example/cat.png")
+        ]
+
+    def test_a_link_in_angle_brackets_still_counts(self):
+        # Discord's way of posting a link without an embed.
+        assert image_links("<https://i.example/cat.gif>") == [
+            ("cat.gif", "https://i.example/cat.gif")
+        ]
+
+    def test_the_same_link_twice_is_one_picture(self):
+        text = "https://i.example/cat.png and https://i.example/cat.png"
+        assert len(image_links(text)) == 1
+
+    def test_no_text_is_no_links(self):
+        assert image_links("") == [] and image_links(None) == []
+
+
+class TestDescribeImages:
     def test_no_images_is_empty(self):
-        assert describe_attachments([]) == ""
+        assert describe_images([]) == ""
 
     def test_names_the_tools_that_actually_work(self):
         # A bare URL sends the agent to fetch_url, which only returns text.
-        out = describe_attachments([("cat.png", "https://cdn.example/cat.png")])
+        out = describe_images([Image("cat.png", "https://cdn.example/cat.png")])
         assert "download_file" in out and "read_image" in out
         assert "- cat.png: https://cdn.example/cat.png" in out
 
+    def test_says_where_each_picture_came_from(self):
+        out = describe_images([
+            Image("cat.png", "https://cdn.example/cat.png", "posted earlier here by Alice"),
+        ])
+        assert "- cat.png (posted earlier here by Alice): https://cdn.example/cat.png" in out
+
+    def test_the_same_url_is_listed_once(self):
+        # A picture can be both attached to the replied-to message and in the
+        # history window; the agent should not download it twice.
+        out = describe_images([
+            Image("cat.png", "https://cdn.example/cat.png", "with the question"),
+            Image("cat.png", "https://cdn.example/cat.png", "posted earlier here by Bob"),
+        ])
+        assert out.count("https://cdn.example/cat.png") == 1
+        assert "more, not listed" not in out
+
     def test_too_many_images_are_capped_and_counted(self):
-        items = [(f"{i}.png", f"https://cdn.example/{i}.png") for i in range(10)]
-        out = describe_attachments(items)
-        assert out.count("https://cdn.example/") == 4
-        assert "and 6 more" in out
+        items = [Image(f"{i}.png", f"https://cdn.example/{i}.png") for i in range(10)]
+        out = describe_images(items)
+        assert out.count("https://cdn.example/") == 6
+        assert "and 4 more" in out
+
+    def test_the_first_ones_survive_the_cap(self):
+        items = [Image(f"{i}.png", f"https://cdn.example/{i}.png") for i in range(10)]
+        out = describe_images(items, max_files=2)
+        assert "0.png" in out and "1.png" in out and "2.png" not in out
