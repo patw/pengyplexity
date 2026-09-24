@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Long Discord answers move into a thread.** A research answer several
+  messages long buried whatever the channel was talking about. Now, once an
+  answer passes `PENGYPLEXITY_DISCORD_THREAD_OVER` characters (1,000), the
+  bot starts a thread from its reply and finishes the answer in there, while
+  it is still streaming. The channel keeps the opening paragraph and a
+  "🧵 More in the thread" pointer; quick answers stay in the channel as
+  before. The thread continues the same conversation and needs no mention.
+  It needs *Create Public Threads*; without it the bot answers in the channel
+  as before. `0` turns it off.
+
 - **Conversations no longer grow without end.** A thread's whole history is
   replayed to the model on every turn, so a Discord channel — bound to one
   Pengyplexity thread forever — made each question dearer than the last: a

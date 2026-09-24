@@ -4,8 +4,10 @@ How it answers:
 
 * **@mention in a channel** is answered in that channel, and the channel is
   one rolling conversation: the bot keeps what it learned there rather than
-  starting over at every mention. With ``PENGYPLEXITY_DISCORD_THREADS=1`` it
-  opens a Discord thread from the question and answers there instead.
+  starting over at every mention. An answer that runs long moves into a
+  Discord thread started from the bot's reply, leaving its opening in the
+  channel (``PENGYPLEXITY_DISCORD_THREAD_OVER``). With
+  ``PENGYPLEXITY_DISCORD_THREADS=1`` every question gets a thread instead.
 * **Inside a thread the bot started**, every message is a follow-up — no
   mention needed.
 * **Replying to one of the bot's answers** in a channel continues that
@@ -32,6 +34,7 @@ web-UI affordance, and a reaction on a busy channel message is not one.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import logging
 from dataclasses import dataclass
@@ -44,6 +47,7 @@ from .apiclient import PengyplexityClient
 from .config import BotConfig
 from .conversations import ConversationMap, channel_key, dm_key, message_key, thread_key
 from .render import (
+    MOVED_TO_THREAD,
     Image,
     Speaker,
     build_question,
@@ -54,6 +58,7 @@ from .render import (
     image_filename,
     image_links,
     looks_like_image_url,
+    moved_answer_text,
     penguin_activity,
     progress_text,
     quote_context,
@@ -82,6 +87,8 @@ class Route:
     new: bool = False
     # Name for the Pengyplexity thread when this conversation creates one.
     title: Optional[str] = None
+    # What was asked, bare — names the Discord thread a long answer moves to.
+    topic: str = ""
 
 
 async def verify_api(api: PengyplexityClient) -> dict:
@@ -292,6 +299,7 @@ class PengyplexityBot(discord.Client):
 
         if route.new:
             route = await self._open_conversation(message, question)
+        route.topic = self._clean(message)
         # Before the context is built, so a rolled-over conversation re-sends
         # the room's recent messages to the fresh thread instead of the one or
         # two lines since the last watermark.
@@ -317,50 +325,90 @@ class PengyplexityBot(discord.Client):
 
     async def _answer(self, message: discord.Message, route: Route, question: str) -> None:
         # One question at a time per conversation: the API refuses a second
-        # turn in a busy thread, so later questions queue here instead.
-        entry = self._locks.setdefault(route.key, [asyncio.Lock(), 0])
+        # turn in a busy thread, so later questions queue here instead. Several
+        # Discord conversations can share one Pengyplexity thread — a channel
+        # and the thread its long answer moved to, or a reply to an old
+        # answer — so the Pengyplexity thread is locked as well as the key.
+        # Always key first, then thread, so two waiters can't deadlock.
+        keys = [route.key]
+        thread_id = self.conversations.thread_for(route.key)
+        if thread_id:
+            keys.append(f"pgy:{thread_id}")
+        queued = any(key in self._locks and self._locks[key][0].locked() for key in keys)
+        if queued:
+            await _quietly(message.add_reaction(QUEUED_EMOJI))
+        async with contextlib.AsyncExitStack() as held:
+            for key in keys:
+                await held.enter_async_context(self._holding(key))
+            if queued:
+                await _quietly(message.remove_reaction(QUEUED_EMOJI, self.user))
+            surface = DiscordSurface(self, route)
+            if not await surface.open():
+                return
+            try:
+                await answer_question(
+                    self.api, self.conversations, route.key, question, surface,
+                    max_upload_bytes=self.config.max_upload_bytes,
+                    title=route.title,
+                )
+            except Exception:
+                log.exception("Failed to answer a question in %s", route.key)
+                await surface.deliver("⚠️ Something went wrong on my side.", [])
+            finally:
+                # The question reached the thread even if answering it
+                # failed, so the next turn must not replay it as context.
+                self.conversations.mark_seen(route.key, message.id)
+                await surface.close()
+
+    @contextlib.asynccontextmanager
+    async def _holding(self, key: str):
+        """Hold the lock for *key*, dropping it from the table once no one
+        holds or awaits it."""
+        entry = self._locks.setdefault(key, [asyncio.Lock(), 0])
         entry[1] += 1
         try:
-            lock = entry[0]
-            queued = lock.locked()
-            if queued:
-                await _quietly(message.add_reaction(QUEUED_EMOJI))
-            async with lock:
-                if queued:
-                    await _quietly(message.remove_reaction(QUEUED_EMOJI, self.user))
-                surface = DiscordSurface(self, route)
-                if not await surface.open():
-                    return
-                try:
-                    await answer_question(
-                        self.api, self.conversations, route.key, question, surface,
-                        max_upload_bytes=self.config.max_upload_bytes,
-                        title=route.title,
-                    )
-                except Exception:
-                    log.exception("Failed to answer a question in %s", route.key)
-                    await surface.deliver("⚠️ Something went wrong on my side.", [])
-                finally:
-                    # The question reached the thread even if answering it
-                    # failed, so the next turn must not replay it as context.
-                    self.conversations.mark_seen(route.key, message.id)
-                    await surface.close()
+            async with entry[0]:
+                yield
         finally:
             entry[1] -= 1
             if entry[1] == 0:
-                self._locks.pop(route.key, None)
+                self._locks.pop(key, None)
 
 
 class DiscordSurface:
-    """A question's progress message, edited live, then replaced by the answer."""
+    """A question's progress message, edited live, then replaced by the answer.
+
+    In a channel, an answer that grows past ``thread_over`` characters is moved
+    out of the way as it is written: a thread is started from the progress
+    message, the answer carries on streaming in there, and the channel keeps
+    only its opening paragraph. Casual one-liners stay in the channel; the
+    research write-ups that flood it don't. The thread is linked to the same
+    Pengyplexity thread, so follow-ups in it need no mention and keep context.
+    """
 
     def __init__(self, bot: PengyplexityBot, route: Route) -> None:
         self.bot = bot
         self.route = route
         self.placeholder: Optional[discord.Message] = None
+        # The message being edited with progress, and where more of the answer
+        # goes: the placeholder and its channel, until the answer moves.
+        self._live: Optional[discord.Message] = None
+        self._room: discord.abc.Messageable = route.channel
+        self._moved = False
+        # Only in an ordinary channel: a thread can't hold a thread, and a
+        # DM has no threads at all.
+        self._may_move = (
+            bot.config.thread_over > 0
+            and route.thread is None
+            and isinstance(route.channel, discord.TextChannel)
+        )
+        self._long = False
         self._wanted: Optional[str] = None
         self._shown: Optional[str] = None
         self._ticker: Optional[asyncio.Task] = None
+        # Held while the ticker touches Discord, so stopping it never cuts a
+        # thread creation off halfway.
+        self._busy = asyncio.Lock()
 
     async def open(self) -> bool:
         text = progress_text(penguin_activity(), "")
@@ -372,30 +420,66 @@ class DiscordSurface:
         except discord.HTTPException as e:
             log.warning("Cannot post in %s: %s", self.route.channel, e)
             return False
+        self._live = self.placeholder
         self._shown = text
         self._ticker = asyncio.create_task(self._tick())
         return True
 
-    async def progress(self, text: str) -> None:
-        self._wanted = text
+    async def progress(self, label: str, partial: str) -> None:
+        if self._may_move and len(partial) > self.bot.config.thread_over:
+            self._long = True
+        self._wanted = progress_text(label, partial)
 
     async def _tick(self) -> None:
         # Edit at a steady pace instead of per token: Discord rate-limits
         # edits, and the latest text is all that matters.
         while True:
             await asyncio.sleep(self.bot.config.edit_interval)
-            wanted = self._wanted
-            if wanted is None or wanted == self._shown:
-                continue
-            try:
-                await self.placeholder.edit(content=wanted, suppress=True)
-                self._shown = wanted
-            except discord.HTTPException as e:
-                log.debug("Progress edit failed: %s", e)
+            async with self._busy:
+                if self._long and not self._moved:
+                    await self._move_to_thread()
+                wanted = self._wanted
+                if wanted is None or wanted == self._shown:
+                    continue
+                try:
+                    await self._live.edit(content=wanted, suppress=True)
+                    self._shown = wanted
+                except discord.HTTPException as e:
+                    log.debug("Progress edit failed: %s", e)
+
+    async def _move_to_thread(self) -> bool:
+        """Start a thread from the progress message and carry on in there.
+
+        Falls back to answering in the channel, as before, if Discord refuses
+        — usually a missing *Create Public Threads*.
+        """
+        self._may_move = self._long = False  # one attempt, however it goes
+        try:
+            thread = await self.placeholder.create_thread(
+                name=thread_name(self.route.topic),
+                auto_archive_duration=THREAD_ARCHIVE_MINUTES,
+            )
+            live = await thread.send(self._wanted or progress_text(penguin_activity(), ""))
+        except discord.HTTPException as e:
+            log.warning(
+                "Could not move a long answer into a thread in #%s (%s); answering "
+                "in the channel. Grant 'Create Public Threads' to fix this.",
+                self.route.channel, e,
+            )
+            return False
+        # Follow-ups in the thread continue this conversation, no mention needed.
+        pgy_thread = self.bot.conversations.thread_for(self.route.key)
+        if pgy_thread:
+            self.bot.conversations.link(thread_key(thread.id), pgy_thread)
+        self._live, self._room, self._moved = live, thread, True
+        self._shown = self._wanted
+        await _quietly(self.placeholder.edit(content=MOVED_TO_THREAD, suppress=True))
+        return True
 
     async def _stop_ticker(self) -> None:
         if self._ticker is not None:
-            self._ticker.cancel()
+            async with self._busy:
+                self._ticker.cancel()
             try:
                 await self._ticker
             except (asyncio.CancelledError, Exception):
@@ -410,16 +494,26 @@ class DiscordSurface:
 
     async def deliver(self, text: str, uploads: List[Upload]) -> List[int]:
         await self._stop_ticker()
-        chunks = split_message(text) or ["…"]
+        # An answer that arrived in one piece never streamed past the limit.
+        if self._may_move and not self._moved and len(text) > self.bot.config.thread_over:
+            await self._move_to_thread()
         sent: List[int] = []
+        if self._moved:
+            try:
+                await self.placeholder.edit(content=moved_answer_text(text), suppress=True)
+                # Replying to the teaser continues the conversation too.
+                sent.append(self.placeholder.id)
+            except discord.HTTPException as e:
+                log.debug("Could not leave the answer's opening in the channel: %s", e)
+        chunks = split_message(text) or ["…"]
         try:
-            await self.placeholder.edit(content=chunks[0], suppress=True)
-            sent.append(self.placeholder.id)
+            await self._live.edit(content=chunks[0], suppress=True)
+            sent.append(self._live.id)
         except discord.HTTPException as e:
             log.warning("Could not edit the answer into place: %s", e)
         for chunk in chunks[1:]:
             try:
-                msg = await self.route.channel.send(chunk, suppress_embeds=True)
+                msg = await self._room.send(chunk, suppress_embeds=True)
                 sent.append(msg.id)
             except discord.HTTPException as e:
                 log.warning("Could not send a %d-character answer chunk: %s", len(chunk), e)
@@ -428,11 +522,11 @@ class DiscordSurface:
             # (too big for this server) never costs the text of the answer.
             files = [discord.File(io.BytesIO(u.data), filename=u.filename) for u in uploads]
             try:
-                msg = await self.route.channel.send(files=files)
+                msg = await self._room.send(files=files)
                 sent.append(msg.id)
             except discord.HTTPException as e:
                 log.warning("Could not upload %d file(s): %s", len(files), e)
-                await _quietly(self.route.channel.send("-# Couldn't attach the files for this answer."))
+                await _quietly(self._room.send("-# Couldn't attach the files for this answer."))
         return sent
 
     async def close(self) -> None:

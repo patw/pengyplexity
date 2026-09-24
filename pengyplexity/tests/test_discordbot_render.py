@@ -7,9 +7,11 @@ from types import SimpleNamespace
 from pengyplexity.discordbot import render
 from pengyplexity.discordbot.render import (
     MESSAGE_LIMIT,
+    MORE_IN_THREAD,
     PENGUIN_ACTIVITIES,
     Image,
     Speaker,
+    answer_teaser,
     build_question,
     clean_question,
     describe_api_error,
@@ -18,6 +20,7 @@ from pengyplexity.discordbot.render import (
     image_links,
     looks_like_image_url,
     format_roster,
+    moved_answer_text,
     penguin_activity,
     progress_text,
     quote_context,
@@ -130,6 +133,35 @@ class TestProgressText:
     def test_closes_an_open_code_fence(self):
         text = progress_text("x", "```py\nprint(1)")
         assert text.split("\n-#")[0].count("```") == 2
+
+
+class TestAnswerTeaser:
+    def test_is_the_first_paragraph(self):
+        answer = "Yes, it ships in 3.13.\n\nThe longer story is that..."
+        assert answer_teaser(answer) == "Yes, it ships in 3.13."
+
+    def test_skips_headings_code_and_tables(self):
+        answer = "## Summary\n\n```py\nx = 1\n```\n\n| a | b |\n|---|---|\n\nThe answer."
+        assert answer_teaser(answer) == "The answer."
+
+    def test_keeps_only_the_prose_before_a_code_block(self):
+        assert answer_teaser("Run this:\n```sh\nls\n```") == "Run this:"
+
+    def test_a_long_paragraph_ends_at_a_sentence(self):
+        teaser = answer_teaser("This is one sentence. " * 30, limit=100)
+        assert len(teaser) <= 100 and teaser.endswith("sentence.")
+
+    def test_a_long_run_on_ends_at_a_word(self):
+        teaser = answer_teaser("word " * 100, limit=50)
+        assert len(teaser) <= 51 and teaser.endswith("word…")
+
+    def test_nothing_usable_is_empty(self):
+        assert answer_teaser("```\ncode only\n```") == ""
+        assert answer_teaser("") == ""
+
+    def test_moved_answer_points_at_the_thread(self):
+        assert moved_answer_text("Short.\n\nMore.") == f"Short.\n{MORE_IN_THREAD}"
+        assert moved_answer_text("```\nx\n```") == MORE_IN_THREAD
 
 
 class TestRenderAnswer:

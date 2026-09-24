@@ -34,6 +34,7 @@ from pengyplexity.discordbot.conversations import (  # noqa: E402
     thread_key,
 )
 from datetime import datetime, timedelta, timezone  # noqa: E402
+from pengyplexity.discordbot.render import progress_text  # noqa: E402
 from pengyplexity.discordbot.session import answer_question  # noqa: E402
 from pengyplexity.tests.test_api import ChartAgent, StreamingAgent  # noqa: E402
 
@@ -98,8 +99,8 @@ class FakeSurface:
         self.delivered = []
         self._next_id = 1000
 
-    async def progress(self, text):
-        self.progress_updates.append(text)
+    async def progress(self, label, partial):
+        self.progress_updates.append(progress_text(label, partial))
 
     async def rename(self, title):
         self.titles.append(title)

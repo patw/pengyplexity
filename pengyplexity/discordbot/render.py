@@ -17,6 +17,10 @@ from urllib.parse import urlsplit
 MESSAGE_LIMIT = 2000
 THREAD_NAME_LIMIT = 100
 MAX_QUOTE_CHARS = 4000
+# What of a long answer stays in the channel once the rest moves to a thread.
+TEASER_CHARS = 300
+MOVED_TO_THREAD = "-# 🧵 Long one — writing it up in the thread."
+MORE_IN_THREAD = "-# 🧵 More in the thread."
 # Status lines shown while a turn runs. The server sends a precise label
 # ("Searching the web…"), and the bot throws it away: nobody in a channel is
 # debugging the agent, they are waiting for an answer. A penguin doing
@@ -359,6 +363,40 @@ def split_message(message: str, limit: int = MESSAGE_LIMIT) -> List[str]:
         if piece.strip():
             out.append(piece)
     return out
+
+
+def answer_teaser(answer: str, limit: int = TEASER_CHARS) -> str:
+    """The opening of a long answer, for the channel message it leaves behind
+    when the rest goes into a thread.
+
+    The first paragraph of prose: a heading alone says nothing, and a code
+    block or table cut short renders as rubble. The bot's user is told to lead
+    with the answer, so that paragraph is usually all a passer-by needs. Cut at
+    a sentence end when one is near the limit, so it doesn't stop mid-word.
+    """
+    for para in re.split(r"\n\s*\n", answer or ""):
+        para = para.strip()
+        if not para or para.startswith(("#", "```", "|", ">")):
+            continue
+        # Prose that runs into a code block keeps only the prose.
+        para = para.split("```", 1)[0].strip()
+        if not para:
+            continue
+        if len(para) <= limit:
+            return para
+        head = para[:limit]
+        stop = max(head.rfind(". "), head.rfind("! "), head.rfind("? "))
+        if stop >= limit // 2:
+            return head[: stop + 1]
+        space = head.rfind(" ")
+        return (head[:space] if space > 0 else head).rstrip(" ,;:-") + "…"
+    return ""
+
+
+def moved_answer_text(answer: str) -> str:
+    """What stays in the channel once an answer has moved to a thread."""
+    teaser = answer_teaser(answer)
+    return f"{teaser}\n{MORE_IN_THREAD}" if teaser else MORE_IN_THREAD
 
 
 def penguin_activity(exclude: Optional[str] = None) -> str:

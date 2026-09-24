@@ -109,11 +109,11 @@ uv run pengyplexity-discord
 
 | Where | What happens |
 | --- | --- |
-| **@mention in a channel** | Answered in the channel, with the recent messages there as context. The channel is one continuing conversation. |
+| **@mention in a channel** | Answered in the channel, with the recent messages there as context. The channel is one continuing conversation. A long answer moves into a thread (see below). |
 | **@mention with an image** | The image is passed to the agent, which fetches it and looks at it. A picture with no text still counts as a question. |
 | **Reply to one of its answers** | Continues that answer's conversation. |
 | **@mention in reply to someone's message** | That message is quoted into the question, so "@bot is this true?" works. |
-| **In a thread the bot started** | Every message is a follow-up; no mention needed. (Only with `PENGYPLEXITY_DISCORD_THREADS=1`.) |
+| **In a thread the bot started** | Every message is a follow-up; no mention needed. That includes a thread a long answer moved into. |
 | **DM** (when enabled) | One running conversation per person; send `!new` to start fresh. |
 
 While it works, the bot edits a single progress message: a penguin doing
@@ -123,6 +123,18 @@ tool calls, so the agent's real activity labels are dropped and a random one
 is shown instead. The final answer replaces the progress message and is split
 across messages if it is over 2,000 characters. Charts and images are attached
 in a message of their own.
+
+**Long answers go into a thread.** Quick answers stay in the channel, but
+once an answer runs past `PENGYPLEXITY_DISCORD_THREAD_OVER` characters (1,000
+by default) the bot starts a thread from its reply and carries on writing in
+there. The channel keeps just the answer's opening paragraph and a
+"🧵 More in the thread" line, so a research write-up doesn't bury the room.
+The switch happens while the answer streams, so the channel never shows the
+whole thing, and charts go into the thread with it. Anything said in that
+thread is a follow-up — no mention needed — and it continues the same
+conversation. The opening paragraph works best when the bot leads with the
+answer, which the system message in [Giving it a voice](#giving-it-a-voice)
+asks it to. Set the variable to `0` to keep everything in the channel.
 
 **There is no stop button.** A turn runs to completion; stopping one part-way
 is a web-UI affordance and stays there.
@@ -210,6 +222,7 @@ appear are the ones the model chose to write into the answer.
 | `PENGYPLEXITY_DISCORD_CHANNELS` | *(all)* | Comma-separated channel IDs to answer in; threads count as their parent channel |
 | `PENGYPLEXITY_DISCORD_ALLOW_DMS` | `0` | Answer direct messages |
 | `PENGYPLEXITY_DISCORD_THREADS` | `0` | `0` answers in the channel, one rolling conversation per channel; `1` opens a Discord thread per question |
+| `PENGYPLEXITY_DISCORD_THREAD_OVER` | `1000` | An in-channel answer longer than this many characters moves into a thread, leaving its opening in the channel; `0` = never |
 | `PENGYPLEXITY_DISCORD_HISTORY` | `20` | Channel messages of context sent with a question; `0` = none |
 | `PENGYPLEXITY_DISCORD_IDLE_HOURS` | `3` | Start a fresh conversation once the room has been quiet this long; `0` = never on idle |
 | `PENGYPLEXITY_DISCORD_MAX_TURNS` | `20` | ...or after this many questions; `0` = no cap |
@@ -277,6 +290,10 @@ that you mentioned the bot itself rather than a role with the same name.
 default. Set `PENGYPLEXITY_DISCORD_THREADS=1` for a thread per question. If it
 is already `1` and you still get channel replies, the bot lacks *Create Public
 Threads* there; the log says so.
+
+**Long answers still land in the channel** — the bot needs *Create Public
+Threads* to move them; without it, it answers in the channel and logs a
+warning. Check `PENGYPLEXITY_DISCORD_THREAD_OVER` isn't `0`.
 
 **It doesn't seem to know what the channel was talking about** — it needs
 *Read Message History* in that channel, and `PENGYPLEXITY_DISCORD_HISTORY`

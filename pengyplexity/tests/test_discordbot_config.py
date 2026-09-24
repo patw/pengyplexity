@@ -43,6 +43,8 @@ def test_defaults(env, tmp_path):
     assert cfg.allow_dms is False
     # Answers land in the channel, not a thread spun off from every question.
     assert cfg.use_threads is False
+    # ...but a long answer moves into one.
+    assert cfg.thread_over == 1000
     assert cfg.history_lines == 20
     assert cfg.send_images is True
     assert cfg.user_rate_limit == 6
@@ -77,6 +79,7 @@ def test_overrides(env, tmp_path):
     env.setenv("PENGYPLEXITY_DISCORD_CHANNELS", "111, 222\n333")
     env.setenv("PENGYPLEXITY_DISCORD_ALLOW_DMS", "1")
     env.setenv("PENGYPLEXITY_DISCORD_THREADS", "1")
+    env.setenv("PENGYPLEXITY_DISCORD_THREAD_OVER", "0")
     env.setenv("PENGYPLEXITY_DISCORD_HISTORY", "5")
     env.setenv("PENGYPLEXITY_DISCORD_IMAGES", "0")
     env.setenv("PENGYPLEXITY_DISCORD_USER_RATE_LIMIT", "0")
@@ -86,6 +89,7 @@ def test_overrides(env, tmp_path):
     assert cfg.channel_ids == frozenset({111, 222, 333})
     assert cfg.allow_dms is True
     assert cfg.use_threads is True
+    assert cfg.thread_over == 0
     assert cfg.history_lines == 5
     assert cfg.send_images is False
     assert cfg.user_rate_limit == 0

@@ -31,6 +31,8 @@ DEFAULT_MAX_TURNS = 20
 DEFAULT_MAX_UPLOAD_MB = 10.0
 # Channel messages of context handed to the model with a question.
 DEFAULT_HISTORY_LINES = 20
+# An in-channel answer longer than this many characters moves to a thread.
+DEFAULT_THREAD_OVER = 1000
 
 
 class ConfigError(ValueError):
@@ -53,6 +55,10 @@ class BotConfig:
     # Answer a new question in a Discord thread started from it (else reply inline
     # and keep one rolling conversation per channel).
     use_threads: bool = False
+    # An answer in a channel that runs past this many characters is moved into
+    # a Discord thread started from the bot's reply, leaving only its opening
+    # in the channel; 0 = never. Short answers stay in the channel.
+    thread_over: int = DEFAULT_THREAD_OVER
     # Preceding channel messages to hand the model as context; 0 = none.
     history_lines: int = DEFAULT_HISTORY_LINES
     # A channel/DM conversation starts a fresh Pengyplexity thread once the
@@ -135,6 +141,7 @@ def load_bot_config() -> BotConfig:
         channel_ids=_channel_ids(os.environ.get("PENGYPLEXITY_DISCORD_CHANNELS", "")),
         allow_dms=_flag("PENGYPLEXITY_DISCORD_ALLOW_DMS", False),
         use_threads=_flag("PENGYPLEXITY_DISCORD_THREADS", False),
+        thread_over=max(0, _env_int("PENGYPLEXITY_DISCORD_THREAD_OVER", DEFAULT_THREAD_OVER)),
         # A negative count is meaningless and would reach discord.py as a limit.
         history_lines=max(0, _env_int("PENGYPLEXITY_DISCORD_HISTORY", DEFAULT_HISTORY_LINES)),
         idle_hours=max(0.0, _env_float("PENGYPLEXITY_DISCORD_IDLE_HOURS", DEFAULT_IDLE_HOURS)),

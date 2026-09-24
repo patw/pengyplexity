@@ -19,7 +19,6 @@ from .render import (
     describe_api_error,
     megabytes,
     penguin_activity,
-    progress_text,
     render_answer,
 )
 
@@ -38,8 +37,11 @@ class Upload:
 class Surface(Protocol):
     """Where a question's progress and answer are shown."""
 
-    async def progress(self, text: str) -> None:
-        """Replace the live progress text. Called often; throttling is the surface's job."""
+    async def progress(self, label: str, partial: str) -> None:
+        """Show the status line and the answer so far (see
+        :func:`~.render.progress_text`). Called often; throttling is the
+        surface's job. The length of *partial* is how a surface can tell a
+        long answer coming before it is finished."""
 
     async def rename(self, title: str) -> None:
         """The Pengyplexity thread was just named from this question."""
@@ -124,10 +126,10 @@ async def _ask(api, conversations, key, question, surface, max_upload_bytes, tit
             # The server's precise label ("Searching the web…") is dropped on
             # purpose; see render.penguin_activity.
             label = penguin_activity(exclude=label)
-            await surface.progress(progress_text(label, partial))
+            await surface.progress(label, partial)
         elif event == "token":
             partial += str(data.get("content") or "")
-            await surface.progress(progress_text(label, partial))
+            await surface.progress(label, partial)
         elif event == "artifact":
             streamed_artifacts.append(data)
         elif event == "error":
